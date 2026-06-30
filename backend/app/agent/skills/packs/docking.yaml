@@ -1,0 +1,50 @@
+skills:
+  - skill_id: molecular_docking
+    name: "分子对接"
+    category: modeling
+    description: "计算小分子配体与蛋白受体的结合模式和亲和力"
+    task_types: [modeling]
+    subtask_types: [molecular_docking]
+    trigger_keywords: [docking, molecular docking, AutoDock, binding affinity]
+    trigger_keywords_cn: [分子对接, 对接, AutoDock, 结合能, 结合模式]
+    required_inputs: [receptor_pdb, ligand_file]
+    allowed_tools: []
+    tool_categories: [modeling]
+    max_tool_rounds: 16
+    parameter_rules:
+      - param_name: docking_software
+        strategy: default
+        rule_description: "对接软件"
+        default_value: "AutoDock Vina"
+        alternatives: ["AutoDock Vina", Smina, AutoDock4]
+    safety_rules: ["对接分数不等于真实结合常数", "需要湿实验验证"]
+    report_sections:
+      - section_id: docking_results
+        title: "对接结果"
+        content_hint: "top poses、结合能、相互作用分析"
+        order: 1
+      - section_id: binding_mode
+        title: "结合模式分析"
+        content_hint: "关键残基、氢键、疏水作用"
+        order: 2
+    output_expectations: [docking_results.csv, best_pose.pdb, binding_pose.png]
+    implementation_status: planned
+    priority: high
+    version: "1.0"
+
+  - skill_id: virtual_screening
+    name: "虚拟筛选"
+    category: modeling
+    description: "对化合物库进行高通量虚拟筛选，发现潜在活性分子"
+    task_types: [drug_screening]
+    subtask_types: [virtual_screening]
+    trigger_keywords: [virtual screening, high-throughput screening, compound library]
+    trigger_keywords_cn: [虚拟筛选, 高通量筛选, 化合物库, 先导化合物]
+    required_inputs: [receptor_pdb, compound_library]
+    allowed_tools: []
+    tool_categories: [modeling, drug_screening]
+    max_tool_rounds: 20
+    safety_rules: ["虚拟筛选结果是计算预测", "hit 化合物需要实验验证活性"]
+    implementation_status: planned
+    priority: medium
+    version: "1.0"

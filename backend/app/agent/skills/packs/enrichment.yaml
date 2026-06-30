@@ -1,0 +1,98 @@
+skills:
+  - skill_id: go_enrichment
+    name: "GO 富集分析"
+    category: enrichment
+    description: "对差异基因列表进行 Gene Ontology (BP/CC/MF) 富集分析"
+    task_types: [bioinformatics]
+    subtask_types: [enrichment]
+    trigger_keywords: [GO, gene ontology, enrichment]
+    trigger_keywords_cn: [GO分析, GO富集, 基因本体, 生物学过程, 细胞组分, 分子功能]
+    required_inputs: [gene_list_file]
+    default_workflow_id: enrichment_standard
+    allowed_tools: [preview_table_file, run_enrichment_analysis]
+    tool_categories: [enrichment, file_io]
+    max_tool_rounds: 8
+    safety_rules: ["不要编造通路", "富集结果不代表因果关系"]
+    report_sections:
+      - section_id: overview
+        title: "分析概述"
+        content_hint: "输入基因数、富集方法、物种"
+        order: 1
+      - section_id: bp_results
+        title: "GO BP 结果"
+        content_hint: "生物学过程显著条目"
+        order: 2
+      - section_id: mf_results
+        title: "GO MF 结果"
+        content_hint: "分子功能显著条目"
+        order: 3
+    output_expectations: [GO_BP_enrichment.csv, GO_CC_enrichment.csv, GO_MF_enrichment.csv, go_dotplot.png]
+    implementation_status: implemented
+    priority: high
+    version: "1.0"
+
+  - skill_id: kegg_enrichment
+    name: "KEGG 通路富集分析"
+    category: enrichment
+    description: "对差异基因列表进行 KEGG 通路富集分析"
+    task_types: [bioinformatics]
+    subtask_types: [enrichment]
+    trigger_keywords: [KEGG, pathway]
+    trigger_keywords_cn: [KEGG, 通路, 代谢通路, 信号通路]
+    required_inputs: [gene_list_file]
+    allowed_tools: [preview_table_file, run_enrichment_analysis]
+    tool_categories: [enrichment, file_io]
+    max_tool_rounds: 6
+    implementation_status: implemented
+    priority: high
+    version: "1.0"
+
+  - skill_id: gsea_prerank
+    name: "GSEA 基因集富集分析"
+    category: enrichment
+    description: "使用预排序基因列表进行 GSEA (Gene Set Enrichment Analysis)"
+    task_types: [bioinformatics]
+    subtask_types: [gsea]
+    trigger_keywords: [GSEA, gene set enrichment, prerank]
+    trigger_keywords_cn: [GSEA, 基因集富集, 预排序]
+    required_inputs: [gene_ranked_list_file]
+    allowed_tools: [preview_table_file, run_gsea_analysis]
+    tool_categories: [enrichment, file_io]
+    max_tool_rounds: 8
+    safety_rules: ["GSEA 需要基因排序 score", "不同基因集数据库结果可能不同"]
+    output_expectations: [gsea_results.csv, gsea_enrichment_plot.png, gsea_leading_edge.csv]
+    implementation_status: implemented
+    priority: high
+    version: "1.0"
+
+  - skill_id: gsva_pathway
+    name: "GSVA 通路活性分析"
+    category: enrichment
+    description: "使用 GSVA 计算每个样本的通路活性评分"
+    task_types: [bioinformatics]
+    subtask_types: [gsva]
+    trigger_keywords: [GSVA, gene set variation]
+    trigger_keywords_cn: [GSVA, 通路活性, 通路评分]
+    required_inputs: [expression_file]
+    optional_inputs: [group_file]
+    allowed_tools: [run_gsva_analysis, preview_table_file]
+    tool_categories: [enrichment, file_io]
+    max_tool_rounds: 8
+    implementation_status: planned
+    priority: medium
+    version: "1.0"
+
+  - skill_id: multi_db_enrichment
+    name: "多数据库综合富集"
+    category: enrichment
+    description: "综合多个数据库（GO/KEGG/Reactome/WikiPathways）的富集分析"
+    task_types: [bioinformatics]
+    subtask_types: [enrichment]
+    trigger_keywords_cn: [综合富集, 多数据库, 功能注释]
+    required_inputs: [gene_list_file]
+    allowed_tools: [run_enrichment_analysis]
+    tool_categories: [enrichment]
+    max_tool_rounds: 10
+    implementation_status: planned
+    priority: low
+    version: "1.0"

@@ -1,0 +1,105 @@
+skills:
+  - skill_id: ml_binary_classification
+    name: "二分类机器学习模型"
+    category: ml
+    description: "使用多种机器学习算法对样本进行二分类建模和比较"
+    task_types: [bioinformatics]
+    subtask_types: [ml_classification]
+    trigger_keywords: [classification, random forest, SVM, xgboost, machine learning]
+    trigger_keywords_cn: [机器学习, 分类, 随机森林, SVM, 预测模型, 二分类]
+    required_inputs: [feature_file]
+    default_workflow_id: ml_classification_standard
+    allowed_tools: [preview_table_file, run_ml_classification, run_lasso_feature_selection, run_multi_model_comparison]
+    tool_categories: [ml, file_io]
+    max_tool_rounds: 12
+    parameter_rules:
+      - param_name: label_col
+        strategy: from_user
+        rule_description: "标签列名"
+      - param_name: feature_preprocess
+        strategy: auto_detect
+        rule_description: "特征预处理方式"
+        default_value: auto
+    qc_rules: [run_ml_data_qc]
+    safety_rules: ["样本量不足可能导致严重过拟合", "结果需要独立测试集验证"]
+    report_sections:
+      - section_id: data_qc
+        title: "数据质量"
+        content_hint: "样本分布、类别平衡、缺失率"
+        order: 1
+      - section_id: model_comparison
+        title: "模型比较"
+        content_hint: "各模型 AUC、Accuracy、Kappa"
+        order: 2
+      - section_id: feature_importance
+        title: "特征重要性"
+        content_hint: "top 特征排名"
+        order: 3
+    output_expectations: [model_metrics.csv, roc_curve.png, confusion_matrix.png, feature_importance.csv]
+    implementation_status: implemented
+    priority: high
+    version: "1.0"
+
+  - skill_id: multi_model_comparison
+    name: "多模型比较"
+    category: ml
+    description: "同时训练和比较多种分类模型（LR/RF/SVM/XGBoost/ElasticNet）"
+    task_types: [bioinformatics]
+    subtask_types: [ml_classification]
+    trigger_keywords_cn: [多模型比较, 模型对比, 集成学习]
+    required_inputs: [feature_file]
+    allowed_tools: [run_multi_model_comparison, preview_table_file]
+    tool_categories: [ml, file_io]
+    max_tool_rounds: 14
+    safety_rules: ["多模型比较不等于最佳模型"]
+    implementation_status: implemented
+    priority: medium
+    version: "1.0"
+
+  - skill_id: lasso_feature_selection
+    name: "LASSO 特征选择"
+    category: ml
+    description: "使用 LASSO 回归进行特征选择"
+    task_types: [bioinformatics]
+    subtask_types: [ml_feature_selection]
+    trigger_keywords: [lasso, feature selection, elastic net]
+    trigger_keywords_cn: [LASSO, 特征选择, 变量筛选]
+    required_inputs: [feature_file]
+    allowed_tools: [run_lasso_feature_selection, preview_table_file]
+    tool_categories: [ml, file_io]
+    max_tool_rounds: 8
+    implementation_status: implemented
+    priority: high
+    version: "1.0"
+
+  - skill_id: shap_interpretation
+    name: "SHAP 模型解释"
+    category: ml
+    description: "使用 SHAP 值解释机器学习模型的特征贡献"
+    task_types: [bioinformatics]
+    subtask_types: [ml_interpretation]
+    trigger_keywords: [SHAP, model interpretation, explainability]
+    trigger_keywords_cn: [SHAP, 模型解释, 特征贡献, 可解释性]
+    required_inputs: [model_file, feature_file]
+    allowed_tools: []
+    tool_categories: [ml]
+    max_tool_rounds: 6
+    safety_rules: ["SHAP 值依赖模型质量", "解释不等同于因果"]
+    implementation_status: planned
+    priority: medium
+    version: "1.0"
+
+  - skill_id: survival_ml
+    name: "生存机器学习模型"
+    category: ml
+    description: "使用随机生存森林、CoxBoost 等生存专用 ML 方法"
+    task_types: [bioinformatics]
+    subtask_types: [ml_classification, survival_analysis]
+    trigger_keywords_cn: [生存随机森林, CoxBoost, 生存预测]
+    required_inputs: [survival_file]
+    allowed_tools: []
+    tool_categories: [ml, survival]
+    max_tool_rounds: 14
+    implementation_status: planned
+    priority: medium
+    version: "1.0"

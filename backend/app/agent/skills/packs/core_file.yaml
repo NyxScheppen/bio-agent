@@ -1,0 +1,88 @@
+skills:
+  - skill_id: file_probe
+    name: "文件探测与预览"
+    category: file_io
+    description: "探测文件结构、编码、分隔符、列名和数据类型，为后续分析提供数据概览"
+    task_types: [file_processing]
+    subtask_types: [file_probe]
+    trigger_keywords: [file, preview, read, upload, table, csv, xlsx, tsv]
+    trigger_keywords_cn: [文件, 预览, 看看, 读取, 上传, 探测, 数据长什么样, 解包, 格式]
+    required_inputs: [file]
+    allowed_tools: [preview_table_file, probe_unknown_file, read_csv_data, load_large_bio_data]
+    tool_categories: [file_io]
+    max_tool_rounds: 4
+    parameter_rules:
+      - param_name: file_path
+        strategy: from_user
+        rule_description: "从用户上传文件列表中选择"
+    clarification_rules:
+      - condition: missing_file
+        question_template: "请先上传需要分析的数据文件"
+        priority: required
+      - condition: ambiguous_format
+        question_template: "文件格式无法自动识别，请说明数据类型（如 CSV、Excel、GEO series_matrix 等）"
+        priority: required
+    safety_rules: ["不要猜测列名，必须基于文件预览结果"]
+    report_sections:
+      - section_id: summary
+        title: "文件概览"
+        content_hint: "文件名、大小、行数、列数"
+        order: 1
+      - section_id: columns
+        title: "列信息"
+        content_hint: "列名、数据类型、缺失值统计"
+        order: 2
+    output_expectations: [file_preview_table, column_info, data_type_summary]
+    implementation_status: implemented
+    priority: high
+    examples:
+      - user_input: "帮我看看这个文件"
+        expected_skill_id: file_probe
+        description: "文件预览请求"
+    version: "1.0"
+
+  - skill_id: file_convert
+    name: "文件格式转换"
+    category: file_io
+    description: "在不同格式间转换生信数据文件，如 CSV/TSV/Excel/RDS 互转"
+    task_types: [file_processing]
+    subtask_types: [file_convert]
+    trigger_keywords_cn: [转换, 格式, 导出, 保存为]
+    required_inputs: [file]
+    allowed_tools: [probe_unknown_file]
+    tool_categories: [file_io]
+    max_tool_rounds: 3
+    implementation_status: planned
+    priority: medium
+    version: "1.0"
+
+  - skill_id: data_merge
+    name: "多表合并"
+    category: file_io
+    description: "按公共列合并多个数据表，支持 inner/left/right/outer join"
+    task_types: [file_processing]
+    subtask_types: [data_merge]
+    trigger_keywords_cn: [合并, 拼接, join, merge, 整合]
+    required_inputs: [file1, file2]
+    allowed_tools: [preview_table_file]
+    tool_categories: [file_io]
+    max_tool_rounds: 5
+    implementation_status: planned
+    priority: low
+    version: "1.0"
+
+  - skill_id: geo_data_download
+    name: "GEO 数据下载与解析"
+    category: file_io
+    description: "从 GEO 数据库下载数据集并解析为可分析格式"
+    task_types: [file_processing]
+    subtask_types: [geo_download]
+    trigger_keywords: [GEO, GSE, series matrix, GEOquery]
+    trigger_keywords_cn: [GEO数据, GSE, 公共数据, 下载数据集]
+    required_inputs: [geo_accession]
+    allowed_tools: [load_large_bio_data, preview_table_file]
+    tool_categories: [file_io]
+    max_tool_rounds: 8
+    implementation_status: partial
+    priority: medium
+    version: "1.0"

@@ -1,0 +1,62 @@
+skills:
+  - skill_id: single_gene_expression
+    name: "单基因表达分析"
+    category: single_gene
+    description: "分析单个基因在不同分组中的表达差异、相关性、ROC 和临床关联"
+    task_types: [bioinformatics]
+    subtask_types: [single_gene_analysis]
+    trigger_keywords: [expression, correlation, roc, clinical]
+    trigger_keywords_cn: [单基因, 表达, 相关性, ROC, 临床关联, 差异表达]
+    required_inputs: [expression_file]
+    optional_inputs: [clinical_file, group_file]
+    default_workflow_id: single_gene_standard
+    allowed_tools: [preview_table_file, run_single_gene_expression_analysis, run_single_gene_correlation, run_single_gene_roc]
+    tool_categories: [single_gene, file_io]
+    max_tool_rounds: 8
+    parameter_rules:
+      - param_name: gene
+        strategy: from_user
+        rule_description: "用户指定的目标基因名"
+      - param_name: expression_preprocess
+        strategy: auto_detect
+        rule_description: "自动判断表达值是否需要 log2 转换"
+        default_value: auto
+    safety_rules: ["raw count 不适合直接用于普通表达比较、相关性或 ROC"]
+    report_sections:
+      - section_id: overview
+        title: "分析概述"
+        content_hint: "目标基因、数据规模、分组信息"
+        order: 1
+      - section_id: expression
+        title: "表达分析"
+        content_hint: "组间表达差异、箱线图/小提琴图"
+        order: 2
+      - section_id: clinical
+        title: "临床关联"
+        content_hint: "与临床变量的相关性"
+        order: 3
+    output_expectations: [expression_boxplot.png, correlation_heatmap.png, roc_curve.png]
+    implementation_status: implemented
+    priority: high
+    examples:
+      - user_input: "分析 TP53 在肿瘤和正常组织中的表达"
+        expected_skill_id: single_gene_expression
+    version: "1.0"
+
+  - skill_id: gene_set_correlation
+    name: "基因集相关性分析"
+    category: single_gene
+    description: "分析一组基因之间的表达相关性，生成相关性热图和网络图"
+    task_types: [bioinformatics]
+    subtask_types: [single_gene_analysis]
+    trigger_keywords_cn: [基因集, 相关性, 共表达, 基因网络, 热图]
+    required_inputs: [expression_file]
+    allowed_tools: [preview_table_file, run_single_gene_correlation]
+    tool_categories: [single_gene, file_io]
+    max_tool_rounds: 8
+    implementation_status: implemented
+    priority: medium
+    examples:
+      - user_input: "分析这 20 个免疫基因的表达相关性"
+        expected_skill_id: gene_set_correlation
+    version: "1.0"

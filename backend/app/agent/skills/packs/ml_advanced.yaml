@@ -1,0 +1,41 @@
+skills:
+  - skill_id: multi_model_comparison
+    name: "多模型比较"
+    category: ml
+    description: "在同一个数据集上训练多个机器学习模型（RF、SVM、XGBoost、Logistic），比较性能并选择最优模型"
+    task_types: [bioinformatics]
+    subtask_types: [ml_classification, model_comparison]
+    trigger_keywords: [compare, multiple model, benchmark]
+    trigger_keywords_cn: [多模型, 比较, 对比, 哪个模型好, RF vs SVM]
+    required_inputs: [data_file]
+    allowed_tools: [run_ml_classification, preview_table_file]
+    tool_categories: [ml, file_io]
+    max_tool_rounds: 15
+    safety_rules: ["小样本时模型比较结果不稳定", "需要独立验证集确认"]
+    output_expectations: [model_comparison.csv, roc_comparison.png, confusion_matrices.png, feature_importance.csv]
+    implementation_status: implemented
+    priority: high
+    examples:
+      - user_input: "比较 RF、SVM 和 XGBoost 哪个分类效果好"
+        expected_skill_id: multi_model_comparison
+    version: "1.0"
+
+  - skill_id: lasso_feature_selection
+    name: "LASSO 特征选择"
+    category: ml
+    description: "使用 LASSO 回归筛选关键特征，输出筛选后的特征列表和交叉验证曲线"
+    task_types: [bioinformatics]
+    subtask_types: [feature_selection]
+    trigger_keywords: [lasso, feature selection]
+    trigger_keywords_cn: [特征选择, LASSO, 变量筛选, 降维]
+    required_inputs: [data_file]
+    allowed_tools: [run_lasso_feature_selection, preview_table_file]
+    tool_categories: [ml, file_io]
+    max_tool_rounds: 8
+    output_expectations: [lasso_features.csv, cv_curve.png, coefficient_plot.png]
+    implementation_status: implemented
+    priority: medium
+    examples:
+      - user_input: "用 LASSO 筛选预后相关的基因"
+        expected_skill_id: lasso_feature_selection
+    version: "1.0"

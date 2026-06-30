@@ -1,0 +1,150 @@
+skills:
+  - skill_id: geo_data_download
+    name: "GEO 数据下载与预处理"
+    category: file_io
+    description: "从 GEO 数据库下载表达数据，自动解析 series_matrix 文件并提取表达矩阵和临床信息"
+    task_types: [file_processing, bioinformatics]
+    subtask_types: [geo_download, data_preprocessing]
+    trigger_keywords: [geo, gse, gpl, series_matrix]
+    trigger_keywords_cn: [GEO, 下载, 公共数据, GSE, 表达谱]
+    required_inputs: [geo_accession]
+    optional_inputs: [platform_id]
+    allowed_tools: [preview_table_file, load_large_bio_data, probe_unknown_file]
+    tool_categories: [file_io, transcriptome]
+    max_tool_rounds: 6
+    parameter_rules:
+      - param_name: geo_accession
+        strategy: from_user
+        rule_description: "GEO accession ID (如 GSE84402)"
+      - param_name: platform_id
+        strategy: auto_detect
+        rule_description: "自动从 series_matrix 中提取"
+    clarification_rules:
+      - condition: missing_accession
+        question_template: "请提供 GEO accession ID（如 GSE84402）"
+        priority: required
+    report_sections:
+      - section_id: overview
+        title: "数据概览"
+        content_hint: "GEO ID、样本数、基因数、平台信息"
+        order: 1
+      - section_id: quality
+        title: "数据质量"
+        content_hint: "缺失值、表达分布、样本聚类"
+        order: 2
+    output_expectations: [expression_matrix.csv, clinical_data.csv, qc_report.txt]
+    implementation_status: implemented
+    priority: high
+    examples:
+      - user_input: "下载 GSE84402 的表达数据"
+        expected_skill_id: geo_data_download
+    version: "1.0"
+
+  - skill_id: deseq2_count_deg
+    name: "DESeq2 原始 count 差异分析"
+    category: transcriptome
+    description: "对 RNA-seq 原始 count 矩阵执行 DESeq2 差异表达分析，适合 count 级数据"
+    task_types: [bioinformatics]
+    subtask_types: [deg_analysis, deseq2]
+    trigger_keywords: [deseq2, count, raw count]
+    trigger_keywords_cn: [DESeq2, 原始count, count矩阵, RNA-seq差异]
+    required_inputs: [count_file, group_file]
+    default_workflow_id: deseq2_count_standard
+    allowed_tools: [run_deseq2_count_deg_analysis, preview_table_file]
+    tool_categories: [transcriptome, file_io]
+    max_tool_rounds: 14
+    parameter_rules:
+      - param_name: control_group
+        strategy: from_file_preview
+        rule_description: "从分组文件中自动检测"
+      - param_name: treatment_group
+        strategy: from_file_preview
+        rule_description: "从分组文件中自动检测"
+    clarification_rules:
+      - condition: ambiguous_control
+        question_template: "分组中有多个值，请明确指定哪个是对照组"
+        priority: required
+    safety_rules: ["DESeq2 仅适用于原始 count 数据，TPM/FPKM 请使用 limma 工具"]
+    output_expectations: [deseq2_results.csv, volcano_plot.png, normalized_counts.csv, heatmap.png]
+    implementation_status: implemented
+    priority: high
+    examples:
+      - user_input: "用 DESeq2 做差异分析"
+        expected_skill_id: deseq2_count_deg
+    version: "1.0"
+
+  - skill_id: bulk_pca_analysis
+    name: "Bulk RNA-seq PCA 分析"
+    category: transcriptome
+    description: "对表达矩阵执行主成分分析，可视化样本间关系和批次效应"
+    task_types: [bioinformatics]
+    subtask_types: [bulk_pca, quality_control]
+    trigger_keywords: [pca, principal component]
+    trigger_keywords_cn: [PCA, 主成分, 样本聚类, 批次效应]
+    required_inputs: [expression_file]
+    optional_inputs: [group_file]
+    allowed_tools: [run_bulk_pca_analysis, preview_table_file]
+    tool_categories: [transcriptome, file_io]
+    max_tool_rounds: 6
+    report_sections:
+      - section_id: overview
+        title: "PCA 概览"
+        content_hint: "PC1/PC2 解释方差、样本数"
+        order: 1
+      - section_id: plot
+        title: "PCA 可视化"
+        content_hint: "PCA 散点图、载荷图"
+        order: 2
+    output_expectations: [pca_plot.png, pca_coordinates.csv, variance_explained.csv]
+    implementation_status: implemented
+    priority: high
+    examples:
+      - user_input: "对表达矩阵做 PCA 看看样本分布"
+        expected_skill_id: bulk_pca_analysis
+    version: "1.0"
+
+  - skill_id: batch_effect_correction
+    name: "批次效应校正"
+    category: transcriptome
+    description: "检测和校正表达数据中的批次效应（ComBat / limma removeBatchEffect）"
+    task_types: [bioinformatics]
+    subtask_types: [batch_correction, quality_control]
+    trigger_keywords_cn: [批次效应, 批次校正, ComBat, 去批次]
+    required_inputs: [expression_file, batch_info_file]
+    allowed_tools: [preview_table_file]
+    tool_categories: [transcriptome, file_io]
+    max_tool_rounds: 8
+    implementation_status: planned
+    priority: medium
+    version: "1.0"
+
+  - skill_id: immune_infiltration
+    name: "免疫浸润分析"
+    category: transcriptome
+    description: "使用 CIBERSORT/ssGSEA/ESTIMATE 等方法评估肿瘤微环境免疫细胞浸润"
+    task_types: [bioinformatics]
+    subtask_types: [immune_analysis]
+    trigger_keywords: [cibersort, immune, estimate, timer]
+    trigger_keywords_cn: [免疫浸润, 免疫细胞, CIBERSORT, 肿瘤微环境, ESTIMATE]
+    required_inputs: [expression_file]
+    allowed_tools: [preview_table_file, run_enrichment_analysis]
+    tool_categories: [transcriptome, enrichment, file_io]
+    max_tool_rounds: 12
+    implementation_status: planned
+    priority: medium
+    version: "1.0"
+
+  - skill_id: time_series_expression
+    name: "时间序列表达分析"
+    category: transcriptome
+    description: "分析时间序列表达数据，识别随时间变化的差异表达基因"
+    task_types: [bioinformatics]
+    subtask_types: [time_series]
+    trigger_keywords_cn: [时间序列, 时序, 时间点, 动态表达]
+    required_inputs: [expression_file, time_info_file]
+    allowed_tools: [preview_table_file]
+    tool_categories: [transcriptome, file_io]
+    max_tool_rounds: 10
+    implementation_status: planned
+    priority: medium
+    version: "1.0"

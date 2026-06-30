@@ -1,0 +1,111 @@
+skills:
+  - skill_id: single_gene_survival
+    name: "单基因生存分析"
+    category: survival
+    description: "对指定基因进行 Kaplan-Meier 生存分析，生成 KM 曲线和 Cox 回归结果"
+    task_types: [bioinformatics]
+    subtask_types: [survival_analysis, cox_analysis, risk_model]
+    trigger_keywords: [survival, cox, kaplan, km, prognosis]
+    trigger_keywords_cn: [生存分析, 生存曲线, 预后, KM, 单基因生存, 风险, OS, DFS, PFS]
+    required_inputs: [survival_file]
+    default_workflow_id: single_gene_survival_standard
+    allowed_tools: [preview_table_file, run_single_gene_survival_analysis, run_univariate_cox_batch, run_multivariate_cox_analysis, run_lasso_cox_model, run_prognostic_risk_model, run_risk_group_survival_analysis, run_time_roc_analysis]
+    tool_categories: [survival, file_io]
+    max_tool_rounds: 10
+    parameter_rules:
+      - param_name: time_col
+        strategy: auto_detect
+        rule_description: "自动检测时间列"
+        alternatives: [OS_time, OS.time, DFS_time, PFS_time, time, survival_time]
+      - param_name: status_col
+        strategy: auto_detect
+        rule_description: "自动检测状态列"
+        alternatives: [OS_status, OS, status, event, vital_status]
+    qc_rules: [run_survival_data_qc]
+    safety_rules: ["status 应为 0/1 编码", "事件数过少时 KM 不稳定"]
+    report_sections:
+      - section_id: overview
+        title: "分析概述"
+        content_hint: "目标基因、数据规模、事件数"
+        order: 1
+      - section_id: km_curve
+        title: "Kaplan-Meier 曲线"
+        content_hint: "KM 图、log-rank p 值"
+        order: 2
+      - section_id: cox
+        title: "Cox 回归"
+        content_hint: "HR、95%CI、p 值"
+        order: 3
+    output_expectations: [km_curve.png, cox_results.csv, survival_analysis_result.csv]
+    implementation_status: implemented
+    priority: high
+    examples:
+      - user_input: "对 TP53 做单基因生存分析"
+        expected_skill_id: single_gene_survival
+    version: "1.0"
+
+  - skill_id: univariate_cox_batch
+    name: "批量单因素 Cox 回归"
+    category: survival
+    description: "对多个基因批量执行单因素 Cox 回归，筛选预后相关基因"
+    task_types: [bioinformatics]
+    subtask_types: [cox_analysis, survival_analysis]
+    trigger_keywords_cn: [单因素Cox, 批量Cox, Cox回归, 预后基因筛选]
+    required_inputs: [survival_file]
+    allowed_tools: [run_univariate_cox_batch, preview_table_file, run_single_gene_survival_analysis]
+    tool_categories: [survival, file_io]
+    max_tool_rounds: 10
+    implementation_status: implemented
+    priority: high
+    version: "1.0"
+
+  - skill_id: lasso_cox_model
+    name: "LASSO-Cox 预后模型"
+    category: survival
+    description: "使用 LASSO 回归筛选特征并构建 Cox 预后模型"
+    task_types: [bioinformatics]
+    subtask_types: [cox_analysis, risk_model]
+    trigger_keywords: [lasso, lasso-cox]
+    trigger_keywords_cn: [LASSO, Lasso回归, Lasso-Cox, 特征筛选]
+    required_inputs: [survival_file]
+    allowed_tools: [run_lasso_cox_model, run_prognostic_risk_model, run_risk_group_survival_analysis, preview_table_file]
+    tool_categories: [survival, file_io]
+    max_tool_rounds: 14
+    safety_rules: ["样本量小于特征数时 LASSO 可能不稳定"]
+    implementation_status: implemented
+    priority: high
+    version: "1.0"
+
+  - skill_id: prognostic_risk_model
+    name: "预后风险评分模型"
+    category: survival
+    description: "构建多基因预后风险评分，包含 KM 分组、timeROC 和 nomogram"
+    task_types: [bioinformatics]
+    subtask_types: [risk_model, cox_analysis]
+    trigger_keywords: [risk score, prognostic model, nomogram]
+    trigger_keywords_cn: [风险评分, 预后模型, 风险模型, 列线图, nomogram]
+    required_inputs: [survival_file]
+    optional_inputs: [clinical_file]
+    allowed_tools: [run_prognostic_risk_model, run_risk_group_survival_analysis, run_time_roc_analysis, run_multivariate_cox_analysis, preview_table_file]
+    tool_categories: [survival, file_io]
+    max_tool_rounds: 14
+    safety_rules: ["风险评分仅用于研究，不是临床决策工具"]
+    output_expectations: [risk_score.csv, km_curve.png, time_roc.png, cox_coefficients.csv, nomogram.png]
+    implementation_status: implemented
+    priority: high
+    version: "1.0"
+
+  - skill_id: competing_risk_analysis
+    name: "竞争风险分析"
+    category: survival
+    description: "考虑竞争事件的生存分析（Fine-Gray 模型、CIF 曲线）"
+    task_types: [bioinformatics]
+    subtask_types: [survival_analysis]
+    trigger_keywords_cn: [竞争风险, Fine-Gray, 累积发生率, CIF]
+    required_inputs: [survival_file]
+    allowed_tools: []
+    tool_categories: [survival]
+    max_tool_rounds: 10
+    implementation_status: planned
+    priority: low
+    version: "1.0"

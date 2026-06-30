@@ -1,0 +1,114 @@
+skills:
+  - skill_id: scrna_standard_pipeline
+    name: "单细胞标准分析流程"
+    category: scrna
+    description: "单细胞 RNA-seq 标准分析：QC→标准化→HVG→PCA→UMAP→聚类"
+    task_types: [bioinformatics]
+    subtask_types: [scrna_analysis, scrna_clustering]
+    trigger_keywords: [scRNA, single cell, Seurat, scRNA-seq, single-cell]
+    trigger_keywords_cn: [单细胞, scRNA, Seurat, 单细胞测序, 聚类, UMAP, tSNE]
+    required_inputs: [scrna_data_file]
+    optional_inputs: [metadata_file]
+    default_workflow_id: scrna_standard
+    allowed_tools: []
+    tool_categories: [scrna]
+    max_tool_rounds: 18
+    parameter_rules:
+      - param_name: min_cells
+        strategy: default
+        rule_description: "基因至少在此数量细胞中表达"
+        default_value: 3
+      - param_name: min_features
+        strategy: default
+        rule_description: "细胞至少表达的基因数"
+        default_value: 200
+      - param_name: max_mt_percent
+        strategy: default
+        rule_description: "线粒体基因最大百分比"
+        default_value: 20
+    qc_rules: [run_scrna_qc]
+    safety_rules: ["细胞类型注释需要 marker 基因验证", "不要凭空命名细胞类型"]
+    report_sections:
+      - section_id: qc
+        title: "质量控制"
+        content_hint: "nFeature、nCount、percent.mt 分布"
+        order: 1
+      - section_id: clustering
+        title: "聚类与降维"
+        content_hint: "UMAP 图、聚类结果"
+        order: 2
+      - section_id: markers
+        title: "Marker 基因"
+        content_hint: "各 cluster 的 marker 基因"
+        order: 3
+    output_expectations: [umap_plot.png, cluster_markers.csv, qc_metrics.csv]
+    implementation_status: planned
+    priority: high
+    version: "1.0"
+
+  - skill_id: scrna_cell_annotation
+    name: "单细胞类型注释"
+    category: scrna
+    description: "基于 marker 基因或参考数据集对单细胞聚类进行细胞类型注释"
+    task_types: [bioinformatics]
+    subtask_types: [scrna_annotation]
+    trigger_keywords: [cell type annotation, cell identity]
+    trigger_keywords_cn: [细胞注释, 细胞类型, 细胞鉴定]
+    required_inputs: [scrna_data_file]
+    optional_inputs: [marker_gene_list]
+    allowed_tools: []
+    tool_categories: [scrna]
+    max_tool_rounds: 10
+    safety_rules: ["注释需要 marker 基因证据", "标注不确定性"]
+    implementation_status: planned
+    priority: high
+    version: "1.0"
+
+  - skill_id: scrna_trajectory
+    name: "单细胞轨迹/拟时序分析"
+    category: scrna
+    description: "使用 Monocle/Slingshot 进行细胞分化轨迹推断"
+    task_types: [bioinformatics]
+    subtask_types: [scrna_trajectory]
+    trigger_keywords: [trajectory, pseudotime, Monocle, Slingshot]
+    trigger_keywords_cn: [轨迹, 拟时序, 分化, Monocle, 发育轨迹]
+    required_inputs: [scrna_data_file]
+    allowed_tools: []
+    tool_categories: [scrna]
+    max_tool_rounds: 14
+    safety_rules: ["拟时序是计算推断，不是真实发育过程"]
+    implementation_status: planned
+    priority: medium
+    version: "1.0"
+
+  - skill_id: scrna_cell_communication
+    name: "单细胞通讯分析"
+    category: scrna
+    description: "使用 CellChat/NicheNet 分析细胞间配体-受体相互作用"
+    task_types: [bioinformatics]
+    subtask_types: [scrna_communication]
+    trigger_keywords: [cell communication, ligand-receptor, CellChat]
+    trigger_keywords_cn: [细胞通讯, 配体受体, CellChat, 细胞互作]
+    required_inputs: [scrna_data_file]
+    allowed_tools: []
+    tool_categories: [scrna]
+    max_tool_rounds: 14
+    implementation_status: planned
+    priority: medium
+    version: "1.0"
+
+  - skill_id: scrna_integration
+    name: "单细胞多样本整合"
+    category: scrna
+    description: "使用 Harmony/CCA/rpca 整合多个单细胞样本，消除批次效应"
+    task_types: [bioinformatics]
+    subtask_types: [scrna_integration]
+    trigger_keywords_cn: [样本整合, 去除批次, Harmony, 多样本, 整合分析]
+    required_inputs: [scrna_data_files]
+    allowed_tools: []
+    tool_categories: [scrna]
+    max_tool_rounds: 18
+    safety_rules: ["整合可能过度校正生物学差异"]
+    implementation_status: planned
+    priority: medium
+    version: "1.0"

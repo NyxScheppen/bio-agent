@@ -1,0 +1,117 @@
+skills:
+  - skill_id: bulk_rnaseq_deg
+    name: "Bulk RNA-seq 差异表达分析"
+    category: transcriptome
+    description: "对 bulk RNA-seq 表达矩阵进行差异表达分析（DESeq2/limma），输出火山图、热图、PCA"
+    task_types: [bioinformatics]
+    subtask_types: [deg_analysis, deseq2, bulk_pca]
+    trigger_keywords: [deg, deseq2, limma, rnaseq, rna-seq, differential]
+    trigger_keywords_cn: [差异分析, 差异表达, 转录组, 表达矩阵, 对照组, 实验组, 火山图, 热图, PCA]
+    required_inputs: [expression_file, group_file]
+    optional_inputs: [batch_file]
+    default_workflow_id: bulk_deg_standard
+    allowed_tools: [preview_table_file, probe_unknown_file, run_bulk_rnaseq_deg_analysis, run_deseq2_count_deg_analysis, run_bulk_pca_analysis]
+    tool_categories: [transcriptome, file_io]
+    max_tool_rounds: 14
+    parameter_rules:
+      - param_name: expression_preprocess
+        strategy: auto_detect
+        rule_description: "自动判断表达矩阵类型（raw_count/non_log2/log2）"
+        default_value: auto
+    clarification_rules:
+      - condition: missing_expression_file
+        question_template: "请上传表达矩阵文件（CSV/TSV，第一列为基因名）"
+        priority: required
+      - condition: missing_group_file
+        question_template: "请上传分组信息文件，需包含 sample 和 group 两列"
+        priority: required
+    qc_rules: [run_bulk_expression_qc]
+    safety_rules: ["raw count 不适合 limma", "TPM/FPKM 不适合 DESeq2"]
+    report_sections:
+      - section_id: overview
+        title: "分析概述"
+        content_hint: "数据规模、分组信息、预处理方式"
+        order: 1
+      - section_id: deg_results
+        title: "差异表达结果"
+        content_hint: "上/下调基因数、top 基因、阈值"
+        order: 2
+      - section_id: figures
+        title: "图表结果"
+        content_hint: "火山图、热图、MA plot"
+        order: 3
+    output_expectations: [deg_results.csv, volcano_plot.png, heatmap.png, pca_plot.png]
+    implementation_status: implemented
+    priority: high
+    examples:
+      - user_input: "对表达矩阵做差异分析"
+        expected_skill_id: bulk_rnaseq_deg
+    version: "1.0"
+
+  - skill_id: deseq2_count_deg
+    name: "DESeq2 Count 差异分析"
+    category: transcriptome
+    description: "使用 DESeq2 对原始 count 矩阵进行差异表达分析"
+    task_types: [bioinformatics]
+    subtask_types: [deseq2, deg_analysis]
+    trigger_keywords: [deseq2, count, raw count]
+    trigger_keywords_cn: [count矩阵, 原始count, DESeq2, read count]
+    required_inputs: [count_file, group_file]
+    default_workflow_id: deseq2_standard
+    allowed_tools: [run_deseq2_count_deg_analysis, preview_table_file]
+    tool_categories: [transcriptome, file_io]
+    max_tool_rounds: 12
+    safety_rules: ["必须是原始 count，不是 TPM/FPKM"]
+    output_expectations: [deseq2_results.csv, volcano.png, ma_plot.png, normalized_counts.csv]
+    implementation_status: implemented
+    priority: high
+    version: "1.0"
+
+  - skill_id: bulk_pca_analysis
+    name: "Bulk RNA-seq PCA 分析"
+    category: transcriptome
+    description: "对 bulk RNA-seq 表达矩阵进行主成分分析"
+    task_types: [bioinformatics]
+    subtask_types: [bulk_pca]
+    trigger_keywords: [pca, principal component]
+    trigger_keywords_cn: [PCA, 主成分, 降维, 样本聚类]
+    required_inputs: [expression_file]
+    optional_inputs: [group_file]
+    allowed_tools: [run_bulk_pca_analysis, preview_table_file]
+    tool_categories: [transcriptome, file_io]
+    max_tool_rounds: 6
+    implementation_status: implemented
+    priority: medium
+    version: "1.0"
+
+  - skill_id: batch_correction
+    name: "批次效应校正"
+    category: transcriptome
+    description: "使用 ComBat/limma 对表达数据进行批次效应校正"
+    task_types: [bioinformatics]
+    subtask_types: [batch_correction]
+    trigger_keywords: [batch, batch effect, combat]
+    trigger_keywords_cn: [批次, 批次效应, 批次校正, 合并批次]
+    required_inputs: [expression_file, batch_file]
+    allowed_tools: [preview_table_file]
+    tool_categories: [transcriptome]
+    max_tool_rounds: 8
+    safety_rules: ["批次校正不能完全消除技术差异"]
+    implementation_status: planned
+    priority: medium
+    version: "1.0"
+
+  - skill_id: time_series_deg
+    name: "时间序列差异分析"
+    category: transcriptome
+    description: "对时间序列 RNA-seq 数据进行差异表达分析"
+    task_types: [bioinformatics]
+    subtask_types: [time_series]
+    trigger_keywords_cn: [时间序列, 时序, 时间点, 动态表达]
+    required_inputs: [expression_file, time_info_file]
+    allowed_tools: []
+    tool_categories: [transcriptome]
+    max_tool_rounds: 12
+    implementation_status: planned
+    priority: low
+    version: "1.0"

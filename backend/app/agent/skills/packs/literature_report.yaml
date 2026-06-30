@@ -1,0 +1,75 @@
+skills:
+  - skill_id: literature_search
+    name: "文献检索与综述"
+    category: literature
+    description: "检索 PubMed/Europe PMC 文献，提取关键信息，生成文献综述"
+    task_types: [literature]
+    subtask_types: [literature_search]
+    trigger_keywords: [literature, PubMed, paper, review, bibliography]
+    trigger_keywords_cn: [文献, 论文, PubMed, 检索, 综述, 参考文献, 查阅]
+    required_inputs: []
+    optional_inputs: [keywords_file]
+    default_workflow_id: literature_standard
+    allowed_tools: [search_literature, fetch_paper_details, download_open_access_pdf]
+    tool_categories: [literature]
+    max_tool_rounds: 10
+    parameter_rules:
+      - param_name: query
+        strategy: from_user
+        rule_description: "检索关键词"
+      - param_name: max_results
+        strategy: default
+        rule_description: "最大结果数"
+        default_value: 20
+    safety_rules: ["不要编造不存在的论文、DOI、PMID", "文献检索结果受数据库覆盖范围限制", "需要标注检索日期和数据库"]
+    report_sections:
+      - section_id: search_strategy
+        title: "检索策略"
+        content_hint: "数据库、关键词、日期、结果数"
+        order: 1
+      - section_id: key_findings
+        title: "关键发现"
+        content_hint: "主要研究结论汇总"
+        order: 2
+      - section_id: references
+        title: "参考文献"
+        content_hint: "完整引用列表"
+        order: 3
+    output_expectations: [literature_results.csv, literature_summary.md]
+    implementation_status: implemented
+    priority: high
+    version: "1.0"
+
+  - skill_id: scientific_report_generation
+    name: "科研报告生成"
+    category: general
+    description: "根据分析结果自动生成结构化科研报告（Markdown/HTML）"
+    task_types: [general]
+    subtask_types: [report_generation]
+    trigger_keywords: [report, summary, document, generate report]
+    trigger_keywords_cn: [报告, 总结, 文档, 生成报告, 写报告]
+    required_inputs: []
+    allowed_tools: []
+    tool_categories: [general]
+    max_tool_rounds: 8
+    safety_rules: ["报告只基于实际分析结果", "不要编造不存在的图表和数据"]
+    report_sections:
+      - section_id: abstract
+        title: "摘要"
+        content_hint: "分析目标和主要结论"
+        order: 1
+      - section_id: methods
+        title: "方法"
+        content_hint: "使用的工具、参数、数据来源"
+        order: 2
+      - section_id: results
+        title: "结果"
+        content_hint: "关键发现、图表"
+        order: 3
+      - section_id: discussion
+        title: "讨论"
+        content_hint: "结果解读和局限性"
+        order: 4
+    implementation_status: planned
+    priority: medium
+    version: "1.0"

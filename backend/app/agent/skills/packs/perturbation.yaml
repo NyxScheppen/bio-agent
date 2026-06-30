@@ -1,0 +1,42 @@
+skills:
+  - skill_id: virtual_knockdown
+    name: "虚拟基因敲低"
+    category: perturbation
+    description: "模拟基因敲低/敲除对表达谱的影响，预测下游通路变化"
+    task_types: [bioinformatics]
+    subtask_types: [perturbation]
+    trigger_keywords: [knockdown, knockout, virtual perturbation, gene silencing]
+    trigger_keywords_cn: [敲低, 敲除, 干扰, siRNA, shRNA, 虚拟扰动]
+    required_inputs: [expression_file]
+    default_workflow_id: perturbation_standard
+    allowed_tools: []
+    tool_categories: [perturbation]
+    max_tool_rounds: 10
+    parameter_rules:
+      - param_name: target_gene
+        strategy: from_user
+        rule_description: "目标基因名"
+      - param_name: knockdown_ratio
+        strategy: default
+        rule_description: "敲低比例（0-1）"
+        default_value: 0.7
+    safety_rules: ["虚拟敲低是计算模拟", "不等同于真实实验敲除", "需要 siRNA/shRNA/CRISPR 验证"]
+    implementation_status: planned
+    priority: medium
+    version: "1.0"
+
+  - skill_id: perturbation_response
+    name: "扰动响应分析"
+    category: perturbation
+    description: "基于 LINCS L1000 或 CRISPR 筛选数据分析药物/基因扰动的转录响应"
+    task_types: [bioinformatics]
+    subtask_types: [perturbation, drug_screening]
+    trigger_keywords: [LINCS, L1000, perturbation response, CRISPR screen]
+    trigger_keywords_cn: [扰动响应, LINCS, L1000, CRISPR筛选, 药物扰动]
+    required_inputs: [perturbation_data_file]
+    allowed_tools: []
+    tool_categories: [perturbation]
+    max_tool_rounds: 12
+    implementation_status: planned
+    priority: medium
+    version: "1.0"

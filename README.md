@@ -232,14 +232,6 @@ skills:
 
 ---
 
-## 🔒 安全提示
-
-- **不要提交 `backend/.env`** — 该文件已加入 `.gitignore`
-- 使用 `backend/.env_example` 作为模板，填入你自己的 API Key
-- 定期轮换 DeepSeek API Key
-
----
-
 ## 📄 License
 
 待定

@@ -3,11 +3,11 @@
 > 范围：`bioagent/main.py`（组合根 `create_app()` + lifespan）、`bioagent/api.py`（`APIRouter` + Pydantic 模型 + task CRUD）。
 > 把 09 的图、03 的 db、04 的 LlmClient、05 的 registry、06 的 RRunner 全接起来：启动时装配依赖，暴露 chat（SSE 流式）/ tasks（任务历史）/ uploads（文件上传）/ tools（工具清单）五个端点。
 > 纯接线 spec：不含任何分析逻辑（那是 11-15）、不含图结构（那是 09）、不含前端（那是 16）。
-> `Config` 取自 02-config、`connect`/`Database` 取自 03-db、`LlmClient` 取自 04-llm、`ToolRegistry` 取自 05-tools、`RRunner` 取自 06-r-runner、`build_graph` 取自 09-orchestration、`TaskStatus` 取自 01-types。
+> `Config` 取自 02-config、`connect`/`Database` 取自 03-db、`LlmClient` 取自 04-llm、`ToolRegistry` 取自 05-tools、`RRunner` 取自 06-r-runner、`Embedder`/`RagClient` 取自 07-rag、`build_graph` 取自 09-orchestration、`TaskStatus` 取自 01-types。
 
 ## 元信息
 
-- **前置依赖**：01-types（`TaskStatus`）、02-config（`Config`/`load_config`）、03-db（`connect`/`Database`）、04-llm（`LlmClient`）、05-tools（`ToolRegistry`）、06-r-runner（`RRunner`）、09-orchestration（`build_graph`）
+- **前置依赖**：01-types（`TaskStatus`）、02-config（`Config`/`load_config`）、03-db（`connect`/`Database`）、04-llm（`LlmClient`）、05-tools（`ToolRegistry`）、06-r-runner（`RRunner`）、07-rag（`Embedder`/`RagClient`）、09-orchestration（`build_graph`）
 - **无循环依赖**：10 是装配终点，只依赖先编号的模块，无任何模块反向依赖它。
 
 ## 用户故事
@@ -18,8 +18,8 @@
 
 - [ ] `main.py` 含 `create_app()`（+ 模块级 `app`）与 lifespan，与「`bioagent/main.py`（完整）」段逐字一致
 - [ ] `api.py` 含 `router` + `ChatRequest`/`TaskSummary`/`TaskDetail` + task CRUD，与「`bioagent/api.py`（完整）」段逐字一致
-- [ ] lifespan 装配：`load_config` → `connect(db_path)` → `LlmClient.from_config` → `ToolRegistry.discover()` → `RRunner` → `build_graph`，全挂到 `app.state`；退出关 `db.conn`
-- [ ] `POST /chat` 建 task → 流式返回 `text/event-stream`：每节点后一条全量 state、结束 `{"done": true}`、失败 `{"error": ...}`，并把 task 置 `COMPLETED`/`FAILED`
+- [ ] lifespan 装配：`load_config` → `connect(db_path)` → `LlmClient.from_config` → `ToolRegistry.discover()` → `RRunner` → `Embedder`+`RagClient`+`ensure_collection()` → `build_graph`，全挂到 `app.state`；退出关 `db.conn`
+- [ ] `POST /chat` 建 task → 流式返回 `text/event-stream`：每节点后一条全量 state、结束 `{"done": true}`、失败 `{"error": ...}`，并把 task 置 `COMPLETED`/`FAILED`（失败时 `error` 落库）
 - [ ] `GET /tasks` 按 `created_at` 倒序列任务摘要；`GET /tasks/{id}` 返回完整 plan/steps/report（404 无则）
 - [ ] `POST /uploads` 落盘到 `upload_dir`（uuid 重命名）+ 写 `upload` 表，返回 `{file_id, original_name, size}`
 - [ ] `GET /tools` 返回 registry 全量工具元数据（name/description/category/runtime/input_schema/frontend）
@@ -34,8 +34,8 @@
 ### 关键决策（实现者务必读，改动前先问）
 
 1. **task CRUD 归属 10-api（修正 03-db 的映射）**：03-db 的表归属写「orchestration（09，写）+ api（10，读）| task」，但 09 是纯图（不写 task，只经 `evaluate_*` 写 `eval_report`/`token_usage`）。task 的写发生在**图的调用方**（10-api，因为只有它知道「一次会话 = 一个 task」）。故 task 的 create/status/complete/fail 落在 `api.py`，09 不碰 task 表。→ 实现时同步改 03-db 那行映射为「api（10，读写）| task」。
-2. **RAG 无消费者（先不构造）**：07-rag 的 `Embedder`/`RagClient` 在 MVP 没有任何节点/工具消费（`KNOWLEDGE` 类别空、reporter 不做接地）。10-api **不在 lifespan 构造 RAG**，避免启动白下载 `all-MiniLM-L6-v2` 模型。这与 07-rag「组合根构造 RAG + ensure_collection」的完成定义冲突——实现时二选一：(a) 补一个知识检索工具 spec（KNOWLEDGE 类别）消费它，或 (b) 改 07 完成定义注明「待有消费者」。先问。
-3. **失败不落 error**：task 表无 error 列；失败时只置 `status=FAILED`，错误文本走 SSE `error` 事件 + 服务端日志（`log.exception`），**不落库**。任务历史里失败任务看不到原因——若要，给 task 表加 `error` 列（改 03-db），先问。
+2. **RAG 两处接地（lifespan 构造 + 注入图）**：RAG 在 planner + reporter 两处接地（09-orchestration 决策 8）。10-api 在 lifespan 用 `config.embedding.model` 建 `Embedder`、用 `config.rag.*` 建 `RagClient`，`ensure_collection()` 后把 `rag` 传给 `build_graph`。首次启动下载 `all-MiniLM-L6-v2` 模型（较慢）；qdrant 未起时 `ensure_collection()`/检索按 09 决策 5 上抛（启动失败或任务 FAILED）。
+3. **失败落 error 列**：task 表有 `error` 列（`str | None`，03-db 已加）。失败时 `fail_task` 把错误文本写进 `error`，同时走 SSE `error` 事件 + 服务端日志（`log.exception`）；`TaskDetail` 带 `error` 字段，任务历史能回看失败原因。
 4. **task 一次性写**：MVP 只在结束/失败时写一次 plan/steps/report（非每节点增量写）；中途崩溃 task 停在 `RUNNING`。逐节点持久化是「未请求的灵活性」，不做。
 5. **SSE 用 POST 流式 + 自定义 hook**：`POST /chat` 直接返回 `StreamingResponse(text/event-stream)`，前端用 `fetch` 读流（`hooks/useSSE.ts`，见 16）。**不用原生 `EventSource`**（它只支持 GET、不能带 POST body）。SSE 事件统一 `data: <json>\n\n`，无 `event:` 字段；前端按 payload 是否有 `done`/`error` 键判别事件类型。
 6. **CORS 开发期放开**：`allow_origins=["*"]`（Vite 前端跨域）；上线收紧为白名单。
@@ -57,6 +57,7 @@ from bioagent.db import connect
 from bioagent.llm.client import LlmClient
 from bioagent.orchestration.graph import build_graph
 from bioagent.r_runner import RRunner
+from bioagent.rag import Embedder, RagClient
 from bioagent.tools import ToolRegistry
 
 log = logging.getLogger(__name__)
@@ -71,7 +72,13 @@ def create_app(config: Config | None = None) -> FastAPI:
         registry = ToolRegistry()
         registry.discover()
         runner = RRunner(cfg.storage.r_scripts_dir)
-        graph = build_graph(client, registry, runner, db, cfg.eval.judge_sample_rate, cfg.storage.upload_dir)
+        embedder = Embedder(cfg.embedding.model)
+        rag = RagClient(embedder, cfg.rag.qdrant_url, cfg.rag.collection, cfg.rag.top_k)
+        await rag.ensure_collection()
+        graph = build_graph(
+            client, registry, runner, db,
+            cfg.eval.judge_sample_rate, cfg.storage.upload_dir, rag,
+        )
         app.state.cfg = cfg
         app.state.db = db
         app.state.registry = registry
@@ -133,6 +140,7 @@ class TaskDetail(TaskSummary):
     plan: list[dict[str, Any]]
     steps: list[dict[str, Any]]
     report: str
+    error: str | None
 
 
 # ---- task CRUD（本 spec 拥有 task 表） ----
@@ -172,11 +180,11 @@ async def complete_task(db: Database, task_id: str, final: dict[str, Any]) -> No
         await db.conn.commit()
 
 
-async def fail_task(db: Database, task_id: str) -> None:
+async def fail_task(db: Database, task_id: str, error: str) -> None:
     async with db.lock:
         await db.conn.execute(
-            "UPDATE task SET status = ?, updated_at = ? WHERE id = ?",
-            (TaskStatus.FAILED.value, time.time(), task_id),
+            "UPDATE task SET status = ?, error = ?, updated_at = ? WHERE id = ?",
+            (TaskStatus.FAILED.value, error, time.time(), task_id),
         )
         await db.conn.commit()
 
@@ -205,7 +213,7 @@ async def chat(req: ChatRequest, request: Request) -> StreamingResponse:
             yield _sse({"done": True, "task_id": task_id})
         except Exception as exc:
             log.exception("chat %s failed", task_id)
-            await fail_task(state.db, task_id)
+            await fail_task(state.db, task_id, str(exc))
             yield _sse({"error": str(exc), "task_id": task_id})
 
     return StreamingResponse(stream(), media_type="text/event-stream")
@@ -249,6 +257,7 @@ async def get_task(task_id: str, request: Request) -> TaskDetail:
         plan=json.loads(row["plan"]),
         steps=json.loads(row["steps"]),
         report=row["report"],
+        error=row["error"],
     )
 
 
@@ -296,10 +305,10 @@ async def list_tools(request: Request) -> list[dict[str, Any]]:
   - [ ] `create_task` → `task` 表一行，`status=="pending"`、`plan=="[]"`、`steps=="[]"`、`report==""`
   - [ ] `set_task_status` → `status` 更新、`updated_at` 变化
   - [ ] `complete_task` → `status=="completed"`、`plan`/`steps` 是 `json.dumps` 结果、`report` 落库
-  - [ ] `fail_task` → `status=="failed"`
+  - [ ] `fail_task` → `status=="failed"` 且 `error` 落库（= 传入的错误文本）
 - [ ] 集成测试 `tests/test_api/`（`fastapi.testclient.TestClient` + 裸 `FastAPI` 挂 `router` + 手动填 `app.state`，**不跑 lifespan**）：
   - [ ] `POST /chat`（`app.state.graph` 换成 fake：`astream` 依次 yield 预设 state）→ `response.text` 是 `data:` 行流；断言含全量 state、末条 `{"done": true, "task_id": ...}`；task 表 `status=="completed"`
-  - [ ] `POST /chat` 失败路径（fake `astream` 中途抛异常）→ 流末条含 `error`；task `status=="failed"`
+  - [ ] `POST /chat` 失败路径（fake `astream` 中途抛异常）→ 流末条含 `error`；task `status=="failed"` 且 `error` 列非空
   - [ ] `POST /chat` 空 message → 422（`min_length=1` 校验）
   - [ ] `GET /tasks` → 倒序摘要；`GET /tasks/{id}` → 完整 detail（`plan`/`steps` 已 `json.loads`）；`GET /tasks/nope` → 404
   - [ ] `POST /uploads`（`files=` 上传小文件）→ 返回 `file_id`；`upload_dir` 下出现 uuid 文件、内容一致；`upload` 表一行

@@ -20,7 +20,7 @@
 - [ ] `useSSE`：POST `/chat`（fetch + `ReadableStream` 读流）、逐条解析 `data: {json}` SSE 帧、把每帧完整状态快照回调出去；非 200 / 流中断 → 错误态
 - [ ] 三个 Zustand store：`chatStore`（消息 + 当前状态快照 + 报告）、`taskStore`（任务列表 + 当前任务）、`uploadStore`（上传中 + file_id）
 - [ ] 五个结果图组件（boxplot/volcano/barplot/network/km_curve）各自 `*Option(data)` 是纯函数，返回确定性的 ECharts option 对象
-- [ ] 组件渲染：聊天面板（消息气泡 + 输入框）、步骤列表（线性步骤 + 状态）、结果图（按 `result_type` 分发）、任务历史（表格 + 点击回看）、文件上传（选文件 → 拿 file_id）
+- [ ] 组件渲染：聊天面板（消息气泡 + 输入框）、步骤列表（线性步骤 + 状态）、结果图（按 `result_type` 分发）、任务历史（表格 + 点击回看，失败任务显示 `error`）、文件上传（选文件 → 拿 file_id）
 - [ ] `frontend.result_type` 五种值都有对应图表；未知 `result_type` → 不崩，展示原始 JSON
 
 ## 技术方案
@@ -28,7 +28,7 @@
 - **栈**：React 18 + Vite + TypeScript（`strict: true`）+ Zustand + ECharts + Tailwind CSS；测试 Vitest + `@testing-library/react` + `@testing-library/jest-dom`。前端是独立包，质量门不走 Python 的 ruff/pyright/pytest，走 eslint + tsc + vitest。
 - **ECharts 用法**：`import * as echarts from 'echarts'`（全量引入，MVP 不 tree-shaking，本地作品集体积可接受）；一个薄 `ECharts` 组件（`useRef` + `useEffect` 挂 `echarts.init`，`option` 变化时 `setOption`），不引 `echarts-for-react`。选项构建收敛到 `charts/options.ts` 纯函数，单测不碰 DOM。
 - **SSE 是 POST**：`/chat` 是 POST（EventSource 只支持 GET），故用 `fetch` + `response.body.getReader()` 手写流解析。每帧是 `data: {完整状态快照}\n\n`（10-api `stream_mode="values"`），前端把最新快照写进 `chatStore.currentState`：`plan` 出现=规划完成、`steps` 追加=执行进度、`report` 出现=结束。
-- **步骤显示是线性的**：plan-and-execute 产出线性步骤（不是真 DAG），StepList 是垂直列表不是图。早期「步骤 DAG」的说法在此收敛为「线性步骤列表」。每步展示工具名 + 状态（pending/running/done/failed）。
+- **步骤显示是线性的**：plan-and-execute 产出线性步骤（不是真 DAG），StepList 是垂直列表不是图。早期「步骤 DAG」的说法在此收敛为「线性步骤列表」。状态来源（09 已定）：`steps` 元素带 `status`（executor 写 `"completed"`），pending = `plan` 中不在 `steps` 里的步骤，failed = 任务级（task `status=="failed"`），无逐步 running（executor 一次性跑完所有步骤）。
 - **result_type → 图表** 映射表：
 
 | result_type | 数据来源 | ECharts series |
@@ -114,7 +114,8 @@ interface ChatState {
 - [ ] `test-inventory.md` 已更新（前端测试条目：图表选项纯函数 / useSSE / stores / 组件分发）
 - [ ] 手动验证：`npm run dev` + 后端起起来，聊天框发一句「帮我做 DGE」，能出步骤列表 + 火山图 + 任务历史可回看
 
-## 跨 spec 对齐点（实现时核对，非本 spec 决定）
+## 已锁定的跨 spec 决策（09/10 已同步）
 
-- **steps 状态字段**：StepList 要显示 pending/running/done/failed，依赖 09-orchestration 的 `steps` 元素里是否带 `status`。若 09 未定义 status 字段，本 spec 需与 09 对齐补上（见下方待确认清单）。
-- **report 内容形态**：reporter（09）产出的 `report` 是纯文本还是带结构化结果引用？决定 ResultChart 是「从 `steps` 里取 tool 结果」还是「从 `report` 里取」。默认：结果图数据取 `steps` 中每个工具的 `result`，`report` 只做文字总结。
+- **steps 带 status**（已定）：09 的 `steps` 元素带 `status`（executor 写 `"completed"`）。StepList：`plan` 中不在 `steps` 里的 = pending，`steps` 里的 = done；failed 是任务级（`status=="failed"`）。
+- **report 纯文本 + 图取 steps**（已定）：reporter 产出 `report` 是 markdown 纯文本；ResultChart 从 `steps` 里每个工具的 `result` 取数据画图（按 `result_type` 分发），`report` 只做文字总结。
+- **失败原因可回看**（已定）：task 表有 `error` 列（`str | None`），`GET /tasks/{id}` 的 `TaskDetail` 带 `error`；TaskHistory 点开失败任务时展示 `error` 文本。

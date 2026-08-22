@@ -10,7 +10,7 @@
 
 ## 用户故事
 
-> 作为 bio agent 系统的开发者，我想要一个文本向量化 + Qdrant 检索的单一入口，以便知识类工具用「query 一个文本 → 拿 top_k 相关块」做领域知识接地，写入与查询都走同一条路。
+> 作为 bio agent 系统的开发者，我想要一个文本向量化 + Qdrant 检索的单一入口，以便 planner 与 reporter 用「query 一个文本 → 拿 top_k 相关块」做领域知识接地（规划接地 + 用户问知识时的报告接地），写入与查询都走同一条路。
 
 ## 验收标准
 
@@ -26,7 +26,7 @@
 - **新文件**：`bioagent/rag.py`（无 Facade、无 API、无数据变更）
 - **库**：`sentence-transformers`（本地 embedding，`all-MiniLM-L6-v2`，dim=384）、`qdrant-client`（`AsyncQdrantClient`，Docker 独立容器，url 来自 `config.rag.qdrant_url`）
 - **公开面**：`from bioagent.rag import Embedder, RagClient`（不加 `__all__`）
-- **谁构造**：组合根（`main.py`，归 10-api）用 `config.embedding.model` 建 `Embedder`，用 `config.rag.*` 建 `RagClient`，注入需要检索的模块（知识类工具 / reporter 接地）。与 06-r-runner 同款注入（executor 持有）
+- **谁构造**：组合根（`main.py`，归 10-api）用 `config.embedding.model` 建 `Embedder`，用 `config.rag.*` 建 `RagClient`，注入 planner 与 reporter（09-orchestration，两处接地）。与 06-r-runner 同款注入
 - **Embedder 是同步纯计算**：sentence-transformers 是 CPU/GPU 计算非 I/O，故 `embed()` 保持同步（符合 CLAUDE.md「纯计算函数保持同步」）。查询时单条短文本、耗时可忽略；**写入（ingest）是离线批量**（seed 脚本/启动时，不在请求路径）
 - **collection 建一次**：`ensure_collection()` 由组合根在启动时调（幂等由 Qdrant 的 `collection_exists` 判定），query/ingest 前不重复建
 - **Qdrant 是 Docker 独立容器**：compose 里 app + qdrant 两个服务，url 指向 `http://qdrant:6333`（容器名）或 `localhost:6333`（开发）
@@ -118,4 +118,4 @@ class RagClient:
 - [ ] `pyright` 零报错
 - [ ] `pytest` 全绿
 - [ ] `test-inventory.md` 已更新
-- [ ] 组合根（10-api）用 `config.embedding.model` + `config.rag.*` 构造 `Embedder`/`RagClient`，启动时 `ensure_collection()`；知识类工具经注入的 `RagClient` 做检索
+- [ ] 组合根（10-api）用 `config.embedding.model` + `config.rag.*` 构造 `Embedder`/`RagClient`，启动时 `ensure_collection()`；planner 与 reporter 经注入的 `RagClient` 做检索接地（见 09-orchestration）

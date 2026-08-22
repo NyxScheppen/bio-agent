@@ -1,11 +1,12 @@
 # 网络药理（Python networkx + STRING PPI）
 
-> 范围：`bioagent/tools/network/__init__.py`（空）+ `bioagent/tools/network/ppi.py`（导出 `TOOL`）。
+> 范围：`backend/bioagent/tools/network/__init__.py`（空）+ `backend/bioagent/tools/network/ppi.py`（导出 `TOOL`）。
 > 一条 Python 工具 `ppi_network`：基因列表 → 调 STRING API 拿蛋白互作 → networkx 图 → 节点（id/degree）+ 边（source/target/score）。
 > 纯工具 spec：只定义这一个工具与 `run` 执行体，不含编排、不含 API、不含 Facade。
 
 ## 元信息
 
+- **包根路径**：Python 包 `bioagent` 源码在 `backend/bioagent/`，import 为 `bioagent.xxx`（`backend/` 在 sys.path 上）
 - **前置依赖**：01-types、05-tools（自动发现）
 - **无循环依赖**：本 spec 不 import 任何 `bioagent` 模块，只 import 第三方（networkx/httpx）
 
@@ -23,13 +24,13 @@
 
 ## 技术方案
 
-- **新文件**：`bioagent/tools/network/__init__.py`（空）、`bioagent/tools/network/ppi.py`
+- **新文件**：`backend/bioagent/tools/network/__init__.py`（空）、`backend/bioagent/tools/network/ppi.py`
 - **库**：`networkx`（图 + degree）、`httpx`（异步调 STRING API）；锁精确版本
 - **数据源 STRING**：`https://string-db.org/api/tsv/network`，`identifiers`（CR 拼接）+ `species`（默认 9606 = 人）。**需运行时联网**；实现时锁 STRING API 的返回列名（`preferredName_A`/`preferredName_B`/`score`），测试用 fixture 不真调 STRING。
 - **httpx 直连（非 LLM）**：CLAUDE.md「不直接使用 httpx」只约束 LLM 调用（走 04-llm）；STRING 是外部数据 API，`httpx.AsyncClient` 合法。`run` 里 `async with httpx.AsyncClient()` 每次新建客户端（工具无注入、不持长连接），MVP 一次请求够用。
 - **测试不触网**：`run` 直调 `httpx.AsyncClient.get`，测试用 `monkeypatch`/`respx` 换掉 `httpx.AsyncClient` 返回 fixture TSV，不真连 STRING。
 
-### `bioagent/tools/network/ppi.py`（完整）
+### `backend/bioagent/tools/network/ppi.py`（完整）
 
 ```python
 from typing import Any

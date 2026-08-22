@@ -1,11 +1,12 @@
 # 配置加载
 
-> 范围：`bioagent/config.py`（`Config` + 6 个分段 dataclass + `load_config()` + `validate_config()` + `ConfigError`）+ `config.yaml`。
+> 范围：`backend/bioagent/config.py`（`Config` + 6 个分段 dataclass + `load_config()` + `validate_config()` + `ConfigError`）+ `config.yaml`。
 > 纯配置 spec：只做加载与校验，不含 Facade、不含 DDL、不含 API。
 > **本文件自包含**：`config.yaml` 与 `config.py` 的完整定义都内联在下文，实现不依赖任何其它文档。
 
 ## 元信息
 
+- **包根路径**：Python 包 `bioagent` 源码在 `backend/bioagent/`，import 为 `bioagent.xxx`（`backend/` 在 sys.path 上）
 - **前置依赖**：无（配置项内联在本文件）
 
 ## 用户故事
@@ -14,7 +15,7 @@
 
 ## 验收标准
 
-- [ ] `config.py` 含 `Config` + 6 分段 dataclass，字段与「`bioagent/config.py`（完整）」段代码逐字一致
+- [ ] `config.py` 含 `Config` + 6 分段 dataclass，字段与「`backend/bioagent/config.py`（完整）」段代码逐字一致
 - [ ] `load_config()` 同步返回 `Config`；缺键填默认值、未知键（含嵌套段内部）报 `ConfigError`
 - [ ] `validate_config()` 是纯函数，逐字段校验，非法报 `ConfigError`
 - [ ] `pyright` strict 下零报错
@@ -22,7 +23,7 @@
 
 ## 技术方案
 
-- **新文件**：`bioagent/config.py`、`config.yaml`（无 Facade、无 API、无数据变更）
+- **新文件**：`backend/bioagent/config.py`、`config.yaml`（无 Facade、无 API、无数据变更）
 - **库**：PyYAML（`yaml.safe_load`）
 - **公开面**：`from bioagent.config import Config, load_config, validate_config`（不加 `__all__`）
 - **同步加载**（启动时一次性，event loop 未起，非运行期 I/O）
@@ -47,7 +48,7 @@ db:
 
 storage:
   upload_dir: data/uploads     # 上传文件落盘目录（10-api，uuid 重命名）
-  r_scripts_dir: bioagent/r_scripts  # 服务端 R 脚本目录（06-r-runner）
+  r_scripts_dir: backend/bioagent/r_scripts  # 服务端 R 脚本目录（06-r-runner）
 
 rag:
   qdrant_url: http://localhost:6333
@@ -58,7 +59,7 @@ eval:
   judge_sample_rate: 0.1       # LLM-judge 抽样比例
 ```
 
-### bioagent/config.py（完整）
+### backend/bioagent/config.py（完整）
 
 ```python
 import os
@@ -94,7 +95,7 @@ class DbConfig:
 @dataclass
 class StorageConfig:
     upload_dir: str = "data/uploads"
-    r_scripts_dir: str = "bioagent/r_scripts"
+    r_scripts_dir: str = "backend/bioagent/r_scripts"
 
 
 @dataclass

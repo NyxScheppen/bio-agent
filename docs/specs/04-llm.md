@@ -1,11 +1,12 @@
 # LLM 统一客户端
 
-> 范围：`bioagent/llm/client.py`（`LlmClient` + `LlmMessage`），LangChain 统一调用、默认 Deepseek、token 抽取、模型名随调用记录、可注入 mock。全项目唯一 LLM 出口。
+> 范围：`backend/bioagent/llm/client.py`（`LlmClient` + `LlmMessage`），LangChain 统一调用、默认 Deepseek、token 抽取、模型名随调用记录、可注入 mock。全项目唯一 LLM 出口。
 > 纯客户端 spec：只做「调 LLM → 返回 `LLMOutput`」，不含 Facade、不含 DDL、不含 API。
 > `LlmClient` / `LlmMessage` 定义内联在本文件；`LLMOutput` / `TokenUsageDict` / `LlmConfig` / `ConfigError` 取自 01-types / 02-config（见前置依赖）。
 
 ## 元信息
 
+- **包根路径**：Python 包 `bioagent` 源码在 `backend/bioagent/`，import 为 `bioagent.xxx`（`backend/` 在 sys.path 上）
 - **前置依赖**：01-types（`LLMOutput`、`TokenUsageDict`）、02-config（`LlmConfig`、`ConfigError`）
 
 ## 用户故事
@@ -14,7 +15,7 @@
 
 ## 验收标准
 
-- [ ] `client.py` 含 `LlmClient` + `LlmMessage`，与「`bioagent/llm/client.py`（完整）」段代码逐字一致
+- [ ] `client.py` 含 `LlmClient` + `LlmMessage`，与「`backend/bioagent/llm/client.py`（完整）」段代码逐字一致
 - [ ] 全项目只有这一处直接调 LLM（不直接用 httpx、不绕过 client 直接 `ChatOpenAI`）
 - [ ] `complete()` 返回 `LLMOutput`：`id` 每次调用唯一（uuid4）、`token_usage` 从 `usage_metadata` 抽取（缺失计 0）、`model` 随每次调用回填
 - [ ] `json_mode=True` 时向模型传 `response_format={"type": "json_object"}`
@@ -24,7 +25,7 @@
 
 ## 技术方案
 
-- **新文件**：`bioagent/llm/client.py`（无 Facade、无 API、无数据变更）
+- **新文件**：`backend/bioagent/llm/client.py`（无 Facade、无 API、无数据变更）
 - **库**：`langchain_core`（`BaseChatModel` / 消息类）、`langchain_openai`（`ChatOpenAI`，deepseek / openai / ollama 等走 OpenAI 兼容接口）
 - **公开面**：`from bioagent.llm.client import LlmClient, LlmMessage`（不加 `__all__`）
 - **内部类（非 Facade）**：编排节点（09-orchestration）与 RAG（07-rag）都通过它调 LLM，是透明化+可追溯的落点
@@ -35,7 +36,7 @@
 - **依赖 pin（实现时锁）**：`pyproject.toml` 里 `langchain-core`、`langchain-openai` 锁精确版本（非 `>=` 宽范围）；`pydantic` 用 `>=2.0` floor。本 spec 的 `usage_metadata`（键 `input_tokens`/`output_tokens`）、`AIMessage.content`（文本为 `str`）、`response_format={"type":"json_object"}` 契约均以锁定版本为准，升级依赖须重跑本 spec 测试
 - **类型收窄（质量门驱动）**：`_extract_usage` 里 `isinstance(usage, dict)` 把 `getattr` 返回的 `Any` 收窄成 `dict[Unknown, Unknown]`，赋给 `dict[str, Any]` 报 partially unknown，故 `cast(dict[str, Any], usage)`（与 02-config `_build` 同模式）；`from_config` 里 `api_key` 用 `SecretStr(api_key)` 包装——langchain-openai 的 `api_key` 别名类型是 `SecretStr | Callable | None`，plain `str` 不满足 pyright strict，`SecretStr` 顺带让密钥不进 repr/日志
 
-### `bioagent/llm/client.py`（完整）
+### `backend/bioagent/llm/client.py`（完整）
 
 ```python
 import os
@@ -145,26 +146,14 @@ class LlmClient:
         output_type: str,
         correlation_id: str,
         json_mode: bool = False,
-        tools: list[dict[str, Any]] | None = None,
     ) -> LLMOutput:
         kwargs: dict[str, Any] = {}
         if json_mode:
             kwargs["response_format"] = {"type": "json_object"}
-        if tools:
-            kwargs["tools"] = tools  # bind_tools：function calling 工具定义
         response = await self._model.ainvoke([_to_lc(m) for m in messages], **kwargs)
         content = response.content
         if not isinstance(content, str):
             raise RuntimeError(f"期望文本 content，得到 {type(content).__name__}")
-        tool_calls: list[dict[str, Any]] = []
-        raw_calls = getattr(response, "tool_calls", None)
-        if raw_calls:
-            for tc in raw_calls:
-                # LangChain 返回 pydantic ToolCall（有 model_dump）；兼容裸 dict。
-                if hasattr(tc, "model_dump"):
-                    tool_calls.append(cast(dict[str, Any], tc.model_dump()))
-                else:
-                    tool_calls.append(cast(dict[str, Any], tc))
         return LLMOutput(
             id=str(uuid.uuid4()),    # 每次调用唯一，供 EvalReport.output_id
             module=module,           # router / planner / executor / reporter / rag
@@ -173,7 +162,6 @@ class LlmClient:
             content=content,
             token_usage=_extract_usage(response),
             correlation_id=correlation_id,
-            tool_calls=tool_calls,
         )
 ```
 
@@ -188,8 +176,6 @@ class LlmClient:
     - [ ] `token_usage` 抽取：`usage_metadata={input_tokens: 12, output_tokens: 7}` → `{input: 12, output: 7}`
     - [ ] `usage_metadata` 缺失 → `{input: 0, output: 0}`
     - [ ] `json_mode=True` → 传给模型的 kwargs 含 `response_format={"type": "json_object"}`；`False` → 不含
-    - [ ] `tools` 非空 → 传给模型的 kwargs 含 `tools`；空/None → 不含
-    - [ ] fake 返回带 `tool_calls` 的 `AIMessage`（pydantic ToolCall 有 `model_dump`）→ `LLMOutput.tool_calls` 正确解析出 name/args；无 `tool_calls` → `[]`
     - [ ] `messages` 顺序与内容按原序透传（fake 记录收到的 LangChain 消息）
     - [ ] 非文本 content（fake 返回 `content=list`）→ `RuntimeError`（不是 `str(list)` 的 repr 垃圾）
   - [ ] `_resolve_base_url` 纯函数：显式 `base_url` 优先 / 已知 provider 命中 / 未知 provider 返回 `None`

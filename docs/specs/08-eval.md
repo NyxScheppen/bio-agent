@@ -1,11 +1,12 @@
 # 评测（两个 judge + 落库）
 
-> 范围：`bioagent/eval/judge.py`（`judge_report` / `judge_tool_call` / `parse_scores`）+ `bioagent/eval/evaluate.py`（`evaluate_report` / `evaluate_tool_call` / `_record`）。
+> 范围：`backend/bioagent/eval/judge.py`（`judge_report` / `judge_tool_call` / `parse_scores`）+ `backend/bioagent/eval/evaluate.py`（`evaluate_report` / `evaluate_tool_call` / `_record`）。
 > 纯基础设施 spec：「两者都判」= 报告质量 judge（format/relevance/completeness）+ 工具调用 judge（intent_correct/tool_correct），各产出一个 `EvalReport`；同时把被评输出与 judge 调用的 token 用量落 `token_usage` 表。
 > `LLMOutput` / `EvalScores` / `EvalReport` / `TokenUsage` / `TokenUsageDict` 取自 01-types；`LlmClient` 取自 04-llm；`Database` / `token_usage` / `eval_report` 表取自 03-db。
 
 ## 元信息
 
+- **包根路径**：Python 包 `bioagent` 源码在 `backend/bioagent/`，import 为 `bioagent.xxx`（`backend/` 在 sys.path 上）
 - **前置依赖**：01-types（`EvalScores` / `EvalReport` / `LLMOutput` / `TokenUsageDict`）、02-config（`EvalConfig.judge_sample_rate` 由编排层读，非本 spec）、03-db（`Database` + `token_usage` / `eval_report` 表）、04-llm（`LlmClient`）
 
 ## 用户故事
@@ -14,8 +15,8 @@
 
 ## 验收标准
 
-- [ ] `judge.py` 含 `judge_report` / `judge_tool_call` / `parse_scores`，与「`bioagent/eval/judge.py`（完整）」段代码逐字一致
-- [ ] `evaluate.py` 含 `evaluate_report` / `evaluate_tool_call` / `_record`，与「`bioagent/eval/evaluate.py`（完整）」段代码逐字一致
+- [ ] `judge.py` 含 `judge_report` / `judge_tool_call` / `parse_scores`，与「`backend/bioagent/eval/judge.py`（完整）」段代码逐字一致
+- [ ] `evaluate.py` 含 `evaluate_report` / `evaluate_tool_call` / `_record`，与「`backend/bioagent/eval/evaluate.py`（完整）」段代码逐字一致
 - [ ] `parse_scores` 纯函数：合法 JSON → 5 维；报告 judge JSON（只 3 键）→ 工具 2 维计 0；坏 JSON / 非对象 / 非数字 → 对应维度计 0，不抛
 - [ ] `judge_*` 以 `output_type="eval"`、`json_mode=True` 调 `client.complete`
 - [ ] `evaluate_*` 写 2 行 `token_usage`（被评 output 一行 + judge 一行，purpose 分别为 `output.type` 与 `"eval"`）+ 1 行 `eval_report`，返回 `EvalReport`
@@ -23,7 +24,7 @@
 
 ## 技术方案
 
-- **新文件**：`bioagent/eval/__init__.py`（空）、`bioagent/eval/judge.py`、`bioagent/eval/evaluate.py`（无 Facade、无 API）
+- **新文件**：`backend/bioagent/eval/__init__.py`（空）、`backend/bioagent/eval/judge.py`、`backend/bioagent/eval/evaluate.py`（无 Facade、无 API）
 - **公开面**：`from bioagent.eval.judge import judge_report, judge_tool_call, parse_scores`、`from bioagent.eval.evaluate import evaluate_report, evaluate_tool_call`（不加 `__all__`）
 - **两个独立 judge（用户已定）**：报告 judge 评报告质量 3 维、工具调用 judge 评意图+工具 2 维，各产一个 `EvalReport`（`type` 判别 `"report"` / `"tool_call"`），职责清晰、可在不同时点触发（工具调用 judge 在执行后、报告 judge 在报告后）
 - **谁触发**：09-orchestration 的 reporter/executor 节点在产出后（按 `config.eval.judge_sample_rate` 抽样）调 `evaluate_*`；本 spec 只提供函数，不决定抽样策略
@@ -32,7 +33,7 @@
 - **不 dedup**：MVP 假定每个 output 至多被 eval 一次（抽样或全量），不做「已评跳过」；重复 eval 会撞 `token_usage` 主键，属调用方 bug
 - **`_record` 原子**：两行 token_usage + 一行 eval_report 在同一 `db.lock` 下、单次 commit，失败整体不落
 
-### `bioagent/eval/judge.py`（完整）
+### `backend/bioagent/eval/judge.py`（完整）
 
 ```python
 import json
@@ -123,7 +124,7 @@ def parse_scores(content: str) -> EvalScores:
     }
 ```
 
-### `bioagent/eval/evaluate.py`（完整）
+### `backend/bioagent/eval/evaluate.py`（完整）
 
 ```python
 import json

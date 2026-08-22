@@ -6,7 +6,7 @@
 - **双重定位**：iGEM 参赛项目 + AI Agent 求职作品集
 - **核心能力**：合成生物学知识专家（RAG 增强）、多任务执行、步骤可视化、可回溯
 - **架构**：LangGraph 多 agent（router → planner → executor → reporter）+ 工具注册表 + RAG + R/Python 双语言
-- **设计文档**：`docs/specs/2026-08-22-synthbio-agent-design.md`（架构决策的唯一权威来源）
+- **设计文档**：`docs/design/2026-08-22-synthbio-agent-design.md`（架构决策的唯一权威来源）
 
 ---
 
@@ -44,14 +44,14 @@
 
 - **Python 3.11+**，严格类型注解（所有函数签名必须有完整类型标注）
 - **命名**：`snake_case` 变量/函数，`PascalCase` 类，`UPPER_SNAKE` 常量
-- **异步**：I/O 操作（工具 `run()`、R 子进程、LLM 调用、RAG 检索）用 `async def`。纯计算函数（KM 估计、Cox 偏似然、PCA、富集统计等）保持同步
+- **异步**：I/O 操作（工具 `run()`、R 子进程、LLM 调用、RAG 检索）用 `async def`。纯计算（如单基因表达统计 mean/median/sd + t 检验、`Embedder.embed`）保持同步
 - **导入顺序**：标准库 → 第三方 → 本地模块（每组之间空行）
 - **枚举**：用 `Enum`，如 `Category`（工具分类）、`Runtime`（python/r）
 - **docstring**：公开方法用 Google style。重点解释 "why" 而非 "what"
 - **LLM 客户端**：必须统一走 LangChain 封装，不直接使用 httpx
-- **R 调用**：必须统一走 `runners/` 的 R 执行器，工具内不直接 `subprocess`
+- **R 调用**：必须统一走 `backend/bioagent/r_runner.py` 的 R 执行器（`RRunner`），工具内不直接 `subprocess`
 - **禁止**：`*` 导入、`except Exception` 吞异常（不重抛）、模块级可变全局变量
-- **豁免（best-effort 旁路）**：RAG 检索、观测（LangSmith）上报、SSE 事件分发等旁路增强的失败只记日志返默认值或跳过、不重抛，主流程正确性不依赖其结果
+- **豁免（best-effort 旁路）**：观测（LangSmith）上报、SSE 事件分发等旁路增强的失败只记日志返默认值或跳过、不重抛，主流程正确性不依赖其结果
 
 ### TypeScript / React
 
@@ -59,7 +59,7 @@
 - 组件命名 `PascalCase`，文件命名 `camelCase.tsx`
 - 所有 API 端点必须有测试
 - 全局状态用 Zustand stores（每个系统一个 store）
-- SSE 事件流用自定义 hook（`hooks/useSSE.ts`）
+- SSE 事件流用自定义 hook（`frontend/src/hooks/useSSE.ts`）
 
 ---
 
@@ -69,9 +69,9 @@
 
 ### 加工具 = 加一个文件
 
-- 新分析能力在 `backend/tools/<category>/<tool_name>/` 下加一个 `ToolDefinition` 文件
+- 新分析能力在 `backend/bioagent/tools/<category>/<tool_name>/` 下加一个 `ToolDefinition` 文件
 - **不改编排层**（router/planner/executor/reporter 无感知）
-- 工具对外统一「文件进、文件出」契约：输入为参数 + 文件路径，输出为结构化结果 + 图
+- 工具对外统一「文件进、文件出」契约：输入为参数 + 文件路径，输出为结构化结果（JSON；图由前端据 result 渲染）
 
 ### 分层（禁止新增抽象层）
 
@@ -80,7 +80,6 @@ API 层 → Agent 编排层 → 工具 / 注册表 / RAG / 执行层
 ```
 
 - 现有分层已足够，不要再加 Repository/Service/Manager 等额外层
-- 例外：`Retriever` 接口是 RAG 层与具体向量库（Qdrant/Chroma）之间的天然接缝，允许
 
 ### 工具分类与管线
 
@@ -100,7 +99,7 @@ API 层 → Agent 编排层 → 工具 / 注册表 / RAG / 执行层
 ### 测试写法
 
 - 每个工具 `run()` 的测试 ≤ 5 个断言
-- 纯计算函数优先测且测全（KM 估计、Cox 偏似然、PCA、富集统计等）
+- 纯计算优先测且测全（如单基因表达统计 mean/median/sd + t 检验、`Embedder.embed`）
 - 管线测试验证 router → … → reporter 的编排正确性
 - 测试目录：`tests/test_{系统}/`
 

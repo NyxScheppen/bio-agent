@@ -1,12 +1,13 @@
 # 差异表达分析（R limma）
 
-> 范围：`bioagent/tools/dge/__init__.py`（空）+ `bioagent/tools/dge/limma_dge.py`（导出 `TOOL`）+ `bioagent/r_scripts/limma_dge.R`。
+> 范围：`backend/bioagent/tools/dge/__init__.py`（空）+ `backend/bioagent/tools/dge/limma_dge.py`（导出 `TOOL`）+ `backend/bioagent/r_scripts/limma_dge.R`。
 > 一条 R 工具 `limma_dge`：表达矩阵 + case/control 样本列表 → limma 差异表（gene/logFC/p_value/adj_p_value，按 p 升序取 top 50）。
 > 纯工具 spec：只定义这一个工具与 R 脚本，不含编排、不含 API、不含 Facade。
 > `ToolDefinition`/`Category`/`Runtime` 取自 01-types；`RRunner` 执行取自 06-r-runner；`matrix_file` 的 `*_file` 解析取自 09-orchestration。
 
 ## 元信息
 
+- **包根路径**：Python 包 `bioagent` 源码在 `backend/bioagent/`，import 为 `bioagent.xxx`（`backend/` 在 sys.path 上）
 - **前置依赖**：01-types、06-r-runner（`RRunner` 执行本 spec 的 R 脚本，工具只声明 `r_script`）、05-tools（自动发现）
 - **无循环依赖**：本 spec 不 import 任何 `bioagent` 模块（R 工具声明式，`run=None`）
 
@@ -24,13 +25,13 @@
 
 ## 技术方案
 
-- **新文件**：`bioagent/tools/dge/__init__.py`（空）、`bioagent/tools/dge/limma_dge.py`、`bioagent/r_scripts/limma_dge.R`
+- **新文件**：`backend/bioagent/tools/dge/__init__.py`（空）、`backend/bioagent/tools/dge/limma_dge.py`、`backend/bioagent/r_scripts/limma_dge.R`
 - **R 依赖**：`limma`（Bioconductor）、`jsonlite`（读 stdin/写 stdout，镜像预装）；Docker 镜像装 `Bioconductor::limma` + `jsonlite`
 - **R 工具 = 声明 + 脚本分离**：Python 文件只声明 `ToolDefinition`（`r_script="limma_dge.R"`、`run=None`），执行体在 `r_scripts/limma_dge.R`，由 executor 持 `RRunner` 跑（06-r-runner 契约：stdin 读 args JSON、stdout `cat(toJSON(...))`）
 - **方向约定**：`group` factor levels 设 `c("control", "case")`，故 `coef=2`（`groupcase`）= case vs control，`logFC>0` 表示 case 高表达。写死在脚本里，不暴露给 LLM 去猜方向。
 - **top 50**：`head(genes[order(p_value), ], 50)`——MVP 只回前 50，报告够用；全量差异表是「未请求的灵活性」，不做。
 
-### `bioagent/tools/dge/limma_dge.py`（完整）
+### `backend/bioagent/tools/dge/limma_dge.py`（完整）
 
 ```python
 from bioagent.enums import Category, Runtime
@@ -85,7 +86,7 @@ TOOL = ToolDefinition(
 )
 ```
 
-### `bioagent/r_scripts/limma_dge.R`（完整）
+### `backend/bioagent/r_scripts/limma_dge.R`（完整）
 
 ```r
 suppressMessages(library(limma))

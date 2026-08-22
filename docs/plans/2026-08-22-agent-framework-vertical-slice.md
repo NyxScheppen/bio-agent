@@ -1,5 +1,7 @@
 # Agent 框架骨架 + 单基因表达竖切片 Implementation Plan
 
+> **⚠️ 已过时（历史快照，勿按此实现）**：本 plan 写于设计文档与 16 份实现 spec 之前，架构已被取代——唯一权威是 `docs/design/2026-08-22-synthbio-agent-design.md` + `docs/specs/`。本文件里的 `backend/app/`→`backend/bioagent/`、`InMemorySaver` checkpointer→task 落库、`thread_id`→`task`、`bind_tools`→planner `json_mode`、`Retriever`→`RagClient` 均已失效。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 搭起「加工具 = 加一个文件」的 agent 框架，并让一条单基因表达管线端到端跑通（前端输入 → router/planner/executor/reporter → SSE 实时步骤 → 结果图）。

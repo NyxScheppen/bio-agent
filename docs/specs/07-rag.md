@@ -1,11 +1,12 @@
 # RAG 向量检索（Embedder + RagClient）
 
-> 范围：`bioagent/rag.py`（`Embedder` + `RagClient`）。本地 sentence-transformers 向量化 + Qdrant 检索（Docker 独立容器）。
+> 范围：`backend/bioagent/rag.py`（`Embedder` + `RagClient`）。本地 sentence-transformers 向量化 + Qdrant 检索（Docker 独立容器）。
 > 纯基础设施 spec：只管「文本 → 向量 → 查 top_k / 写入」，不含知识库内容/清洗/分块策略（那是数据工程）、不含 Facade、不含 API。
 > `Embedder` / `RagClient` 定义内联在本文件；`embedding.model` / `rag.*` 取自 02-config（由组合根传入，非本 spec import）。
 
 ## 元信息
 
+- **包根路径**：Python 包 `bioagent` 源码在 `backend/bioagent/`，import 为 `bioagent.xxx`（`backend/` 在 sys.path 上）
 - **前置依赖**：02-config（`EmbeddingConfig` / `RagConfig` 的字段语义对应构造参数，但 `rag.py` **不 import** 任何 `bioagent` 模块）
 
 ## 用户故事
@@ -14,7 +15,7 @@
 
 ## 验收标准
 
-- [ ] `bioagent/rag.py` 含 `Embedder` + `RagClient`，与「`bioagent/rag.py`（完整）」段代码逐字一致
+- [ ] `backend/bioagent/rag.py` 含 `Embedder` + `RagClient`，与「`backend/bioagent/rag.py`（完整）」段代码逐字一致
 - [ ] `Embedder.embed(text)` 返回 `list[float]`（长度 = 模型维度）；`dim` 属性返回维度
 - [ ] `RagClient.ensure_collection()` 建 collection（维度 = embedder.dim、距离 COSINE）
 - [ ] `RagClient.query(text)` 返回 `list[dict]`（每条 `{"text", "score"}`），条数 ≤ top_k
@@ -23,7 +24,7 @@
 
 ## 技术方案
 
-- **新文件**：`bioagent/rag.py`（无 Facade、无 API、无数据变更）
+- **新文件**：`backend/bioagent/rag.py`（无 Facade、无 API、无数据变更）
 - **库**：`sentence-transformers`（本地 embedding，`all-MiniLM-L6-v2`，dim=384）、`qdrant-client`（`AsyncQdrantClient`，Docker 独立容器，url 来自 `config.rag.qdrant_url`）
 - **公开面**：`from bioagent.rag import Embedder, RagClient`（不加 `__all__`）
 - **谁构造**：组合根（`main.py`，归 10-api）用 `config.embedding.model` 建 `Embedder`，用 `config.rag.*` 建 `RagClient`，注入 planner 与 reporter（09-orchestration，两处接地）。与 06-r-runner 同款注入
@@ -33,7 +34,7 @@
 - **依赖 pin（实现时锁）**：`sentence-transformers`、`qdrant-client` 锁精确版本；`query_points`/`upload_points`/`create_collection` 的方法签名以锁定版本为准，升级须重跑本 spec 测试
 - **不做**：不做分块/清洗策略（数据工程，非本 spec）；不内嵌知识库内容；不做多 collection 管理（MVP 单 collection）
 
-### `bioagent/rag.py`（完整）
+### `backend/bioagent/rag.py`（完整）
 
 ```python
 from typing import Any

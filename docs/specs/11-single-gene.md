@@ -1,12 +1,13 @@
 # 单基因表达分析（Python）
 
-> 范围：`bioagent/tools/single_gene/__init__.py`（空）+ `bioagent/tools/single_gene/expression.py`（导出 `TOOL`）。
+> 范围：`backend/bioagent/tools/single_gene/__init__.py`（空）+ `backend/bioagent/tools/single_gene/expression.py`（导出 `TOOL`）。
 > 一条 Python 工具 `single_gene_expression`：给定基因 + 表达矩阵 + 分组，算每组表达分布（mean/median/sd）+ 两组 t 检验。
 > 纯工具 spec：只定义这一个工具与 `run` 执行体，不含编排、不含 API、不含 Facade。
 > `ToolDefinition`/`Category`/`Runtime` 取自 01-types；`discover()` 自动发现取自 05-tools；`matrix_file` 的 `*_file` 解析取自 09-orchestration。
 
 ## 元信息
 
+- **包根路径**：Python 包 `bioagent` 源码在 `backend/bioagent/`，import 为 `bioagent.xxx`（`backend/` 在 sys.path 上）
 - **前置依赖**：01-types（`ToolDefinition`/`Category`/`Runtime`）、05-tools（`discover()` 自动发现）
 - **无循环依赖**：本 spec 不 import 任何 `bioagent` 模块，只 import 第三方（pandas/scipy）；只被 `discover()` 被动发现
 
@@ -16,7 +17,7 @@
 
 ## 验收标准
 
-- [ ] `bioagent/tools/single_gene/expression.py` 导出 `TOOL`（`ToolDefinition`，`category==Category.SINGLE_GENE`、`runtime==Runtime.PYTHON`、`run` 非空、`r_script is None`），与「工具定义」段逐字一致
+- [ ] `backend/bioagent/tools/single_gene/expression.py` 导出 `TOOL`（`ToolDefinition`，`category==Category.SINGLE_GENE`、`runtime==Runtime.PYTHON`、`run` 非空、`r_script is None`），与「工具定义」段逐字一致
 - [ ] `run(matrix_file, gene, groups)` 读 TSV 矩阵、按 `groups` 分组、算 `samples`（组→每样本值）+ `summary`（组→{n, mean, median, sd}）+ `p_value`（恰两组时 t 检验）
 - [ ] 基因不在矩阵 → `ValueError`；组数非 2 → `p_value=None`（不报错）
 - [ ] 输出所有数值是 Python 原生类型（numpy 标量已 `float()`/`.tolist()`，可 `json.dumps`）
@@ -24,14 +25,14 @@
 
 ## 技术方案
 
-- **新文件**：`bioagent/tools/single_gene/__init__.py`（空）、`bioagent/tools/single_gene/expression.py`
+- **新文件**：`backend/bioagent/tools/single_gene/__init__.py`（空）、`backend/bioagent/tools/single_gene/expression.py`
 - **库**：`pandas`（读矩阵/统计）、`scipy`（`stats.ttest_ind`）；锁精确版本
 - **矩阵格式约定（11-15 通用，本 spec 首次定义）**：TSV，行 = 基因（首列 = gene symbol，作 index），列 = 样本（首行 = 样本名）。`read_csv(..., sep="\t", index_col=0)`。
 - **同步 pandas 读文件**：`run` 是 `async def`（满足 ToolDefinition.run 的 `Awaitable` 契约），但 pandas 读文件/统计是同步 CPU+磁盘，MVP 小矩阵直接同步做（不套 `asyncio.to_thread`）；矩阵变大再异步化，先不做。
 - **`*_file` 解析在 executor**：`matrix_file` 填的是上传返回的 file_id；executor（09）已把它解析成绝对路径，`run` 收到的就是路径，直接 `read_csv`。工具自身不 import config、不碰 upload 表。
 - **JSON 可序列化是硬约束**：executor 会把 `steps` 交给 reporter `json.dumps`，numpy `float64`/`int64` 会炸。故 `mean/median/std` 全 `float()`、每样本值 `.tolist()`。这是 11-15 所有 Python 工具的通用规则。
 
-### `bioagent/tools/single_gene/expression.py`（完整）
+### `backend/bioagent/tools/single_gene/expression.py`（完整）
 
 ```python
 from typing import Any

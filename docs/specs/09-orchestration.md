@@ -1,12 +1,13 @@
 # 编排（LangGraph 四节点）
 
-> 范围：`bioagent/orchestration/state.py`（`AgentState`）、`bioagent/orchestration/nodes.py`（`make_router_node` / `make_planner_node` / `make_executor_node` / `make_reporter_node`）、`bioagent/orchestration/graph.py`（`build_graph`）。
+> 范围：`backend/bioagent/orchestration/state.py`（`AgentState`）、`backend/bioagent/orchestration/nodes.py`（`make_router_node` / `make_planner_node` / `make_executor_node` / `make_reporter_node`）、`backend/bioagent/orchestration/graph.py`（`build_graph`）。
 > 把 router → planner → executor → reporter 四节点装成 LangGraph `StateGraph`，跑一次「问题 → 意图 → 规划 → 执行 → 报告」。
 > 纯编排 spec：只定义图结构与节点，不含 API 层（那是 10-api）、不含任何具体工具（那是 11-15）、不含 Facade。
-> `LlmClient` 取自 04-llm、`ToolRegistry`/`to_llm_tool` 取自 05-tools、`RRunner` 取自 06-r-runner、`RagClient` 取自 07-rag、`Database` 取自 03-db、`evaluate_report`/`evaluate_tool_call` 取自 08-eval、`Category`/`Runtime` 取自 01-types。
+> `LlmClient` 取自 04-llm、`ToolRegistry` 取自 05-tools、`RRunner` 取自 06-r-runner、`RagClient` 取自 07-rag、`Database` 取自 03-db、`evaluate_report`/`evaluate_tool_call` 取自 08-eval、`Category`/`Runtime` 取自 01-types。
 
 ## 元信息
 
+- **包根路径**：Python 包 `bioagent` 源码在 `backend/bioagent/`，import 为 `bioagent.xxx`（`backend/` 在 sys.path 上）
 - **前置依赖**：01-types（`Category`/`Runtime`）、03-db（`Database`）、04-llm（`LlmClient`/`LlmMessage`）、05-tools（`ToolRegistry`）、06-r-runner（`RRunner`）、07-rag（`RagClient`）、08-eval（`evaluate_report`/`evaluate_tool_call`）
 - **无循环依赖**：本 spec 只被 10-api 依赖；它依赖的所有模块（01/03/04/05/06/08）都先于它编号。11-15 的生物工具不 import 本 spec。
 
@@ -16,9 +17,9 @@
 
 ## 验收标准
 
-- [ ] `state.py` 含 `AgentState`，字段与「`bioagent/orchestration/state.py`（完整）」段逐字一致
-- [ ] `nodes.py` 含 4 个 `make_*_node` 工厂，与「`bioagent/orchestration/nodes.py`（完整）」段逐字一致
-- [ ] `graph.py` 含 `build_graph`，与「`bioagent/orchestration/graph.py`（完整）」段逐字一致
+- [ ] `state.py` 含 `AgentState`，字段与「`backend/bioagent/orchestration/state.py`（完整）」段逐字一致
+- [ ] `nodes.py` 含 4 个 `make_*_node` 工厂，与「`backend/bioagent/orchestration/nodes.py`（完整）」段逐字一致
+- [ ] `graph.py` 含 `build_graph`，与「`backend/bioagent/orchestration/graph.py`（完整）」段逐字一致
 - [ ] 图拓扑：`START → router → planner → executor → reporter → END`（线性，无分支）
 - [ ] router 用 `json_mode=True` 调 LLM，输出 `{"intent": str, "categories": list[str]}`；`categories` 来自 `[c.value for c in Category]` 数据驱动推导，不写死列表
 - [ ] planner 用 `registry.for_categories()` 裁剪工具、`json_mode=True` 产出 `{"steps": [{tool, args}]}`；executor 机械执行不调 LLM
@@ -29,7 +30,7 @@
 
 ## 技术方案
 
-- **新文件**：`bioagent/orchestration/__init__.py`（空）、`bioagent/orchestration/state.py`、`bioagent/orchestration/nodes.py`、`bioagent/orchestration/graph.py`（无 Facade、无 API）
+- **新文件**：`backend/bioagent/orchestration/__init__.py`（空）、`backend/bioagent/orchestration/state.py`、`backend/bioagent/orchestration/nodes.py`、`backend/bioagent/orchestration/graph.py`（无 Facade、无 API）
 - **库**：`langgraph`（`StateGraph`）；`langchain-core`（消息类，仅 04-llm 内用，本 spec 不直接用）
 - **公开面**：`from bioagent.orchestration.graph import build_graph`、`from bioagent.orchestration.state import AgentState`（不加 `__all__`；`nodes.py` 的 `make_*_node` 是 `build_graph` 的实现细节，不单独导出）
 
@@ -44,7 +45,7 @@
 7. **`*_file` 参数约定（文件解析）**：工具 input_schema 里以 `_file` 结尾的字段（如 `matrix_file` / `clinical_file`）填上传接口返回的 `file_id`；executor 执行前用 `_resolve_files` 把它们解析成 `upload_dir` 下的绝对路径，R/Python 脚本直接 `read.table`/`read_csv` 即可。原因：工具靠 `discover()` 自动发现、拿不到组合根注入的 `upload_dir`，而 R 脚本（06-r-runner）只收 args 无 DB 访问，故解析统一落在 executor（它被注入 `upload_dir`）。
 8. **RAG 接地在 planner + reporter（两处）**：planner 规划前、reporter 写报告前，各用 `rag.query(query)` 取 top_k 相关语料拼进 prompt——planner 用地接地规划、reporter 用地回答「用户问知识」。检索失败按决策 5 异常上抛（qdrant 未起 = 任务 FAILED）；collection 为空只返回空列表，prompt 用「（无相关语料）」占位，不阻断。`rag` 由组合根（10-api）构造并注入（07-rag）。
 
-### `bioagent/orchestration/state.py`（完整）
+### `backend/bioagent/orchestration/state.py`（完整）
 
 ```python
 from typing import Any, TypedDict
@@ -65,7 +66,7 @@ class AgentState(TypedDict, total=False):
     report: str                 # reporter 最终报告（markdown，纯文本）
 ```
 
-### `bioagent/orchestration/nodes.py`（完整）
+### `backend/bioagent/orchestration/nodes.py`（完整）
 
 ```python
 import json
@@ -244,7 +245,7 @@ def make_reporter_node(
     return reporter
 ```
 
-### `bioagent/orchestration/graph.py`（完整）
+### `backend/bioagent/orchestration/graph.py`（完整）
 
 ```python
 from langgraph.graph import END, START, StateGraph

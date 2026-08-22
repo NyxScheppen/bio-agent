@@ -1,12 +1,13 @@
 # API 层 + 组合根（FastAPI + SSE）
 
-> 范围：`bioagent/main.py`（组合根 `create_app()` + lifespan）、`bioagent/api.py`（`APIRouter` + Pydantic 模型 + task CRUD）。
+> 范围：`backend/bioagent/main.py`（组合根 `create_app()` + lifespan）、`backend/bioagent/api.py`（`APIRouter` + Pydantic 模型 + task CRUD）。
 > 把 09 的图、03 的 db、04 的 LlmClient、05 的 registry、06 的 RRunner 全接起来：启动时装配依赖，暴露 chat（SSE 流式）/ tasks（任务历史）/ uploads（文件上传）/ tools（工具清单）五个端点。
 > 纯接线 spec：不含任何分析逻辑（那是 11-15）、不含图结构（那是 09）、不含前端（那是 16）。
 > `Config` 取自 02-config、`connect`/`Database` 取自 03-db、`LlmClient` 取自 04-llm、`ToolRegistry` 取自 05-tools、`RRunner` 取自 06-r-runner、`Embedder`/`RagClient` 取自 07-rag、`build_graph` 取自 09-orchestration、`TaskStatus` 取自 01-types。
 
 ## 元信息
 
+- **包根路径**：Python 包 `bioagent` 源码在 `backend/bioagent/`，import 为 `bioagent.xxx`（`backend/` 在 sys.path 上）
 - **前置依赖**：01-types（`TaskStatus`）、02-config（`Config`/`load_config`）、03-db（`connect`/`Database`）、04-llm（`LlmClient`）、05-tools（`ToolRegistry`）、06-r-runner（`RRunner`）、07-rag（`Embedder`/`RagClient`）、09-orchestration（`build_graph`）
 - **无循环依赖**：10 是装配终点，只依赖先编号的模块，无任何模块反向依赖它。
 
@@ -16,8 +17,8 @@
 
 ## 验收标准
 
-- [ ] `main.py` 含 `create_app()`（+ 模块级 `app`）与 lifespan，与「`bioagent/main.py`（完整）」段逐字一致
-- [ ] `api.py` 含 `router` + `ChatRequest`/`TaskSummary`/`TaskDetail` + task CRUD，与「`bioagent/api.py`（完整）」段逐字一致
+- [ ] `main.py` 含 `create_app()`（+ 模块级 `app`）与 lifespan，与「`backend/bioagent/main.py`（完整）」段逐字一致
+- [ ] `api.py` 含 `router` + `ChatRequest`/`TaskSummary`/`TaskDetail` + task CRUD，与「`backend/bioagent/api.py`（完整）」段逐字一致
 - [ ] lifespan 装配：`load_config` → `connect(db_path)` → `LlmClient.from_config` → `ToolRegistry.discover()` → `RRunner` → `Embedder`+`RagClient`+`ensure_collection()` → `build_graph`，全挂到 `app.state`；退出关 `db.conn`
 - [ ] `POST /chat` 建 task → 流式返回 `text/event-stream`：每节点后一条全量 state、结束 `{"done": true}`、失败 `{"error": ...}`，并把 task 置 `COMPLETED`/`FAILED`（失败时 `error` 落库）
 - [ ] `GET /tasks` 按 `created_at` 倒序列任务摘要；`GET /tasks/{id}` 返回完整 plan/steps/report（404 无则）
@@ -27,7 +28,7 @@
 
 ## 技术方案
 
-- **新文件**：`bioagent/main.py`、`bioagent/api.py`（无 Facade；这是系统的 API 出口）
+- **新文件**：`backend/bioagent/main.py`、`backend/bioagent/api.py`（无 Facade；这是系统的 API 出口）
 - **库**：`fastapi` + `uvicorn`；`pydantic`（请求/响应模型，`>=2.0` 与 04-llm 一致）
 - **公开面**：`from bioagent.main import create_app`；`from bioagent.api import router`（不加 `__all__`）
 
@@ -42,7 +43,7 @@
 7. **上传整读内存**：`await file.read()` 全量读（MVP 小 CSV/TSV 够用）；表达矩阵变大换 `aiofiles` 分块写。`write_bytes` 是同步 I/O，会短暂阻塞 event loop，MVP 接受。
 8. **`load_config` 延迟到 lifespan**：`create_app()` 不在 import 时读 `config.yaml`（放在 lifespan 里），测试可 `create_app(cfg)` 注入配置、或直接裸 `FastAPI` + `include_router(router)` + 手动填 `app.state` 测路由。
 
-### `bioagent/main.py`（完整）
+### `backend/bioagent/main.py`（完整）
 
 ```python
 import logging
@@ -101,7 +102,7 @@ def create_app(config: Config | None = None) -> FastAPI:
 app = create_app()  # 生产入口：uvicorn bioagent.main:app
 ```
 
-### `bioagent/api.py`（完整）
+### `backend/bioagent/api.py`（完整）
 
 ```python
 import json

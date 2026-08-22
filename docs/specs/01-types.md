@@ -80,7 +80,7 @@ class EvalScores(TypedDict):               # eval 得分：报告质量 3 维 + 
     relevance: float                       # 报告与问题相关度
     completeness: float                    # 报告完整性
     intent_correct: float                  # router 意图判定是否正确
-    tool_correct: float                    # executor 工具选择是否正确
+    tool_correct: float                    # planner 工具选择是否正确（plan 步骤的 tool 是否合适）
 ```
 
 ### dataclass（`backend/bioagent/types.py`，4 个）

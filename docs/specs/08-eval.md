@@ -26,8 +26,8 @@
 
 - **新文件**：`backend/bioagent/eval/__init__.py`（空）、`backend/bioagent/eval/judge.py`、`backend/bioagent/eval/evaluate.py`（无 Facade、无 API）
 - **公开面**：`from bioagent.eval.judge import judge_report, judge_tool_call, parse_scores`、`from bioagent.eval.evaluate import evaluate_report, evaluate_tool_call`（不加 `__all__`）
-- **两个独立 judge（用户已定）**：报告 judge 评报告质量 3 维、工具调用 judge 评意图+工具 2 维，各产一个 `EvalReport`（`type` 判别 `"report"` / `"tool_call"`），职责清晰、可在不同时点触发（工具调用 judge 在执行后、报告 judge 在报告后）
-- **谁触发**：09-orchestration 的 reporter/executor 节点在产出后（按 `config.eval.judge_sample_rate` 抽样）调 `evaluate_*`；本 spec 只提供函数，不决定抽样策略
+- **两个独立 judge（用户已定）**：报告 judge 评报告质量 3 维、工具调用 judge 评意图+工具 2 维，各产一个 `EvalReport`（`type` 判别 `"report"` / `"tool_call"`），职责清晰、可在不同时点触发（工具调用 judge 在规划后、报告 judge 在报告后）。**工具调用 judge 评的对象 = planner 的 `plan`**（步骤序列 `[{tool, args}]`，`tool_calls` 参数名即此）：`tool_correct` 评「planner 选的工具对不对」，**不是** executor 的 step 输出——executor 机械执行、不选工具（见 09 决策 1/3）
+- **谁触发**：09-orchestration 的 planner（产出 `plan` 后调 `evaluate_tool_call`）/ reporter（产出 `report` 后调 `evaluate_report`）按 `config.eval.judge_sample_rate` 抽样触发；本 spec 只提供函数，不决定抽样策略
 - **judge 返回原始 `LLMOutput`**（不直接返回分数）：evaluate 层需要 judge 的 `token_usage` + `id` 落库，故 judge 返回 `LLMOutput`，`parse_scores` 单独解析 `content`——「调 LLM」与「解析」分离
 - **token 记账完整**：evaluate 写两行 `token_usage`——被评 output（`purpose=output.type`，`id=output.id`）与 judge 调用（`purpose="eval"`，`id=judge_output.id`）。judge 调用自身不再被 eval（否则无限递归）
 - **不 dedup**：MVP 假定每个 output 至多被 eval 一次（抽样或全量），不做「已评跳过」；重复 eval 会撞 `token_usage` 主键，属调用方 bug
@@ -245,4 +245,4 @@ async def _record(
 - [ ] `pyright` 零报错
 - [ ] `pytest` 全绿
 - [ ] `test-inventory.md` 已更新
-- [ ] 09-orchestration 在 reporter/executor 产出后（按 `judge_sample_rate` 抽样）调 `evaluate_report` / `evaluate_tool_call`，`EvalReport` 与 `TokenUsage` 落库可查
+- [ ] 09-orchestration 在 planner 产出 plan 后调 `evaluate_tool_call`、reporter 产出 report 后调 `evaluate_report`（按 `judge_sample_rate` 抽样），`EvalReport` 与 `TokenUsage` 落库可查

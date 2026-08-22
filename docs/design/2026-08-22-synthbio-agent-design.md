@@ -179,6 +179,8 @@ report          # reporter 生成的最终报告（markdown 纯文本）
 
 **可回溯**：一次会话 = 一个 task（`correlation_id`），plan/steps/report 完整落库（03-db 的 task 表），SSE 逐节点推前端。可回溯 = 从 task 表读回任意 task 的完整状态。MVP 不接 LangGraph checkpointer（resume 不在范围，见 spec 09）。
 
+**评测锚点（两个 judge）**：工具调用 judge 评的是 **planner 的 `plan`**（`tool_correct` = planner 选的工具是否合适），不是 executor 的 step 输出——executor 机械执行、不选工具；报告 judge 评 reporter 的 `report`。两 judge 按 `judge_sample_rate` 抽样触发（见 08-eval / spec 09 决策 3）。
+
 ### 5.3 RAG 层
 
 - `RagClient`（`backend/bioagent/rag.py`）：`Embedder`（本地 sentence-transformers，`all-MiniLM-L6-v2`，dim=384）+ Qdrant（`AsyncQdrantClient`，Docker 独立容器）。

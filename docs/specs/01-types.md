@@ -145,7 +145,7 @@ class TokenUsage:           # 一次 LLM 调用记账（对应 token_usage 表�
 
 **`id` / `created_at` 约定**（跨 dataclass 统一）：所有 `id` 都是 uuid4 字符串（`str(uuid.uuid4())`），由创建该对象的模块生成（如 `LLMOutput` → 04-llm、`EvalReport` → 08-eval）；`created_at` 是 Unix epoch 秒（float，`time.time()`）。类型层只声明字段、不生成 id。
 
-**`EvalReport` 落锚约定**（08-eval 实现必读）：`type="tool_call"` 的 report **锚 planner 的 plan 输出**（`output_id` / `module` = planner 那次 `client.complete` 的 id / `"planner"`）；`intent_correct` 虽是 router 维度，但作为 tool_call judge 的输入之一（`intent` 是普通字符串）与 `tool_correct` 同落这一份 report，router 的 intent 输出**不单独 eval**（但其 token 由 04-llm 照常记入 `token_usage`，`purpose="intent"`）。`type="report"` 锚 reporter 的 report 输出。`EvalReport.token_usage` 存 **judge 本次评测**的 token（= `judge_output.token_usage` 自包含快照，非被评对象 token——后者经 `output_id` 查 `token_usage` 表即可）。
+**`EvalReport` 落锚约定**（08-eval 实现必读）：`type="tool_call"` 的 report **锚 planner 的 plan 输出**（`output_id` / `module` = planner 那次 `client.complete` 的 id / `"planner"`）；`intent_correct` 虽是 router 维度，但作为 tool_call judge 的输入之一（`intent` 是普通字符串）与 `tool_correct` 同落这一份 report，router 的 intent 输出**不单独 eval**（但其 token 由 04-llm 照常记入 `token_usage`，`purpose="intent"`）。`type="report"` 锚 reporter 的 report 输出。`EvalReport.token_usage` 存 **judge 本次评测**的 token（= `judge_output.token_usage` 自包含快照，非被评对象 token——后者经 `correlation_id`（+ `module`/`purpose`）查 `token_usage` 表即可）。
 
 ### 嵌套 dict 字段的边界（哪些收 TypedDict / 哪些留 `dict[str, Any]`）
 

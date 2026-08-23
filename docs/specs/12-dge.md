@@ -9,7 +9,7 @@
 
 - **包根路径**：Python 包 `bioagent` 源码在 `backend/bioagent/`，import 为 `bioagent.xxx`（`backend/` 在 sys.path 上）
 - **前置依赖**：01-types、06-r-runner（`RRunner` 执行本 spec 的 R 脚本，工具只声明 `r_script`）、05-tools（自动发现）
-- **无循环依赖**：本 spec 不 import 任何 `bioagent` 模块（R 工具声明式，`run=None`）
+- **无循环依赖**：本 spec 只 import 纯类型/枚举叶子模块（`bioagent.enums`/`bioagent.types`，无回边），不 import 任何编排/执行模块（R 工具声明式，`run=None`）
 
 ## 用户故事
 
@@ -20,7 +20,7 @@
 - [ ] `limma_dge.py` 导出 `TOOL`（`category==Category.DGE`、`runtime==Runtime.R`、`r_script=="limma_dge.R"`、`run is None`），与「工具定义」段逐字一致
 - [ ] `limma_dge.R` 读 stdin JSON、`read.delim` 读矩阵、limma `lmFit→eBayes→topTable`、`cat(toJSON(...))` 输出，与「R 脚本」段逐字一致
 - [ ] 输出 `{"genes": [{gene, logFC, p_value, adj_p_value}, ...]}`，按 p 升序、最多 50 条
-- [ ] case/control 与矩阵列对齐（列缺失不崩溃——子集到存在的列）
+- [ ] 样本名不在矩阵、或任一组样本数 < 2 → `stop`（非零退出，06-r-runner 转 `RRuntimeError`）
 - [ ] `pyright` strict 零报错（工具定义文件）
 
 ## 技术方案
@@ -95,9 +95,18 @@ args <- jsonlite::fromJSON(file("stdin"))
 
 mat <- read.delim(args$matrix_file, row.names = 1, check.names = FALSE)
 
-# 子集到存在的样本列，case/control 顺序与 levels 一致
-case <- intersect(args$case, colnames(mat))
-control <- intersect(args$control, colnames(mat))
+# 校验：样本名必须都在矩阵列中（与 11-single-gene 缺失样本报错对齐）
+missing <- setdiff(c(args$case, args$control), colnames(mat))
+if (length(missing) > 0) {
+  stop("样本不在矩阵中: ", paste(missing, collapse = ", "))
+}
+
+# case/control 顺序与 factor levels 一致（control 在前、case 在后）
+case <- args$case
+control <- args$control
+if (length(case) < 2 || length(control) < 2) {
+  stop("case/control 与矩阵对齐后样本不足")
+}
 mat <- mat[, c(control, case), drop = FALSE]
 
 group <- factor(c(rep("control", length(control)), rep("case", length(case))),
@@ -125,6 +134,8 @@ cat(jsonlite::toJSON(list(genes = top), auto_unbox = TRUE))
   - [ ] `TOOL` 形状：`category is Category.DGE`、`runtime is Runtime.R`、`r_script == "limma_dge.R"`、`run is None`
   - [ ] `register()` 契约通过：该 TOOL 能通过 `ToolRegistry.register()`（`run=None` + `r_script` 非空 = 合法 R 工具）
   - [ ] R 脚本本身（`monkeypatch`/子进程 mock 不真跑 R）：断言脚本文本含 `fromJSON(file("stdin"))`、`lmFit`、`eBayes`、`topTable`、`cat(jsonlite::toJSON(...))`（字符串断言，验证 stdin/stdout 契约与 limma 流程）
+  - [ ] R 脚本对齐下限：脚本文本含 `if (length(case) < 2 || length(control) < 2)` + `stop(...)`（字符串断言；退化输入走非零退出，由 06-r-runner 转 `RRuntimeError`）
+  - [ ] R 脚本样本校验：脚本文本含 `setdiff(c(args$case, args$control), colnames(mat))` 且缺失即 `stop`（字符串断言；任何样本名不在矩阵 → 非零退出）
 - [ ] 集成测试：无（不真跑 Rscript，测试不依赖真实 R/limma 环境——与 06-r-runner 一致）
 - [ ] E2E 测试：无
 

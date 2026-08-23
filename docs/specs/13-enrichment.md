@@ -9,7 +9,7 @@
 
 - **包根路径**：Python 包 `bioagent` 源码在 `backend/bioagent/`，import 为 `bioagent.xxx`（`backend/` 在 sys.path 上）
 - **前置依赖**：01-types、06-r-runner、05-tools（自动发现）
-- **无循环依赖**：本 spec 不 import 任何 `bioagent` 模块（R 工具声明式，`run=None`）
+- **无循环依赖**：本 spec 只 import 纯类型/枚举叶子模块（`bioagent.enums`/`bioagent.types`，无回边），不 import 任何编排/执行模块（R 工具声明式，`run=None`）
 
 ## 用户故事
 
@@ -20,6 +20,7 @@
 - [ ] `go_kegg.py` 导出 `TOOL`（`category==Category.ENRICHMENT`、`runtime==Runtime.R`、`r_script=="go_kegg.R"`、`run is None`），与「工具定义」段逐字一致
 - [ ] `go_kegg.R` 读 stdin JSON、`enrichGO`（BP）+ `enrichKEGG`（tryCatch 包裹）、`cat(toJSON(...))` 输出，与「R 脚本」段逐字一致
 - [ ] 输出 `{"go": [...], "kegg": [...]}`，各按 p 升序 top 20；KEGG 失败（无网/无映射）→ `kegg` 空数组，`go` 不受影响
+- [ ] 空 `gene_list` → `stop`（非零退出，06-r-runner 转 `RRuntimeError`）
 - [ ] `pyright` strict 零报错（工具定义文件）
 
 ## 技术方案
@@ -74,6 +75,9 @@ suppressMessages(library(org.Hs.eg.db))
 
 args <- jsonlite::fromJSON(file("stdin"))
 genes <- args$gene_list
+if (length(genes) == 0) {
+  stop("gene_list 为空")
+}
 
 ego <- clusterProfiler::enrichGO(
   gene = genes,
@@ -104,7 +108,7 @@ cat(jsonlite::toJSON(result, auto_unbox = TRUE))
 - [ ] 单元测试 `tests/test_tools_enrichment/`：
   - [ ] `TOOL` 形状：`category is Category.ENRICHMENT`、`runtime is Runtime.R`、`r_script == "go_kegg.R"`、`run is None`
   - [ ] `register()` 契约通过（合法 R 工具）
-  - [ ] R 脚本（字符串断言，不真跑 R）：含 `enrichGO`、`keyType = "SYMBOL"`、`enrichKEGG`、`tryCatch`、`cat(jsonlite::toJSON(...))`
+  - [ ] R 脚本（字符串断言，不真跑 R）：含 `enrichGO`、`keyType = "SYMBOL"`、`enrichKEGG`、`tryCatch`、`cat(jsonlite::toJSON(...))`、`if (length(genes) == 0)` + `stop(...)`
 - [ ] 集成测试：无（不真跑 Rscript，与 06-r-runner 一致）
 - [ ] E2E 测试：无
 

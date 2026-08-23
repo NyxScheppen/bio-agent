@@ -72,7 +72,7 @@ class RRunner:
                 f"{stderr.decode('utf-8', 'replace').strip()}"
             )
         try:
-            data = json.loads(stdout.decode("utf-8"))
+            data = json.loads(stdout.decode("utf-8", "replace"))
         except json.JSONDecodeError as exc:
             raise RRuntimeError(
                 f"{script_name} 输出非合法 JSON：{stdout.decode('utf-8', 'replace')[:200]}"
@@ -92,6 +92,7 @@ class RRunner:
   - [ ] 成功路径：fake 返回 `returncode=0`、`stdout=b'{"a": 1}'` → `run()` 返回 `{"a": 1}`
   - [ ] 非零退出：fake 返回 `returncode=1`、`stderr=b"Error in ..."` → `RRuntimeError`，消息含 stderr 文本
   - [ ] stdout 非 JSON：fake 返回 `returncode=0`、`stdout=b"not json"` → `RRuntimeError`
+  - [ ] stdout 非法 UTF-8：fake 返回 `returncode=0`、`stdout=b"\xff\xfe"` → `RRuntimeError`（`decode('utf-8', 'replace')` 兜底，不抛裸 `UnicodeDecodeError`）
   - [ ] stdout 非对象：fake 返回 `returncode=0`、`stdout=b'[1,2,3]'` → `RRuntimeError`
   - [ ] Rscript 缺失：`create_subprocess_exec` 抛 `FileNotFoundError` → `RRuntimeError`
 - [ ] 集成测试：无（不真跑 Rscript，测试不依赖真实 R 环境）

@@ -279,7 +279,7 @@ async def upload(request: Request, file: UploadFile = File(...)) -> dict[str, An
             (file_id, file.filename or "", str(path), len(content), now),
         )
         await state.db.conn.commit()
-    return {"file_id": file_id, "original_name": file.filename, "size": len(content)}
+    return {"file_id": file_id, "original_name": file.filename or "", "size": len(content)}
 
 
 @router.get("/tools")

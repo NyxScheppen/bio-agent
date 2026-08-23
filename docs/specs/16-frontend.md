@@ -17,8 +17,8 @@
 ## 验收标准
 
 - [ ] `npm run dev` 起 Vite；`npm run lint`（eslint）、`npm run typecheck`（`tsc --noEmit`）、`npm run test`（vitest）全绿
-- [ ] `useSSE`：POST `/chat`（fetch + `ReadableStream` 读流）、逐条解析 `data: {json}` SSE 帧、把每帧完整状态快照回调出去；非 200 / 流中断 → 错误态
-- [ ] 三个 Zustand store：`chatStore`（消息 + 当前状态快照 + 报告）、`taskStore`（任务列表 + 当前任务）、`uploadStore`（上传中 + file_id）
+- [ ] `useSSE`：POST `/chat`（fetch + `ReadableStream` 读流）、逐条解析 `data: {json}` SSE 帧；有 `done` 键 → resolve、有 `error` 键 → 置 error、否则把整帧快照回调 `onEvent`；非 200 / 流中断 → 错误态
+- [ ] 三个 Zustand store：`chatStore`（消息 + 当前状态快照 + 报告）、`taskStore`（任务列表 + 当前任务）、`uploadStore`（上传中 + fileId）
 - [ ] 五个结果图组件（boxplot/volcano/barplot/network/km_curve）各自 `*Option(data)` 是纯函数，返回确定性的 ECharts option 对象
 - [ ] 组件渲染：聊天面板（消息气泡 + 输入框）、步骤列表（线性步骤 + 状态）、结果图（按 `result_type` 分发）、任务历史（表格 + 点击回看，失败任务显示 `error`）、文件上传（选文件 → 拿 file_id）
 - [ ] `frontend.result_type` 五种值都有对应图表；未知 `result_type` → 不崩，展示原始 JSON
@@ -39,6 +39,8 @@
 | `network` | ppi_network（nodes/edges） | graph（force 力导向布局） |
 | `km_curve` | km_cox（km_curves: time/survival） | line（`step: 'end'` 阶梯） |
 
+**`result_type` 来源**：`result_type` 不随 SSE 快照下发。前端启动时 `listTools()`（`GET /tools`）建 `tool_name → frontend.result_type` 映射；`ResultChart` 拿 `step.tool` 查映射得 `result_type`，再按上表分发。这是 `listTools` 的唯一消费方，也避免 09 在 step 里重复塞 `result_type`（第二份真相）。
+
 ### 目录结构
 
 ```
@@ -51,6 +53,7 @@ frontend/
   src/
     main.tsx
     App.tsx
+    types.ts              # 共享 TS 类型（见下方「类型定义」）
     api/client.ts          # fetch 封装：chatSSE/listTasks/getTask/upload/listTools
     hooks/useSSE.ts        # POST /chat 流式 hook
     stores/chatStore.ts
@@ -65,10 +68,92 @@ frontend/
     components/FileUpload.tsx
 ```
 
-### `hooks/useSSE.ts`（核心签名，完整实现见 plan）
+### 类型定义（`src/types.ts`）
+
+> 分两类：**透传类型**（后端 wire shape，snake_case 照写，前端不转换）与**前端领域类型**（camelCase，`client.ts` 统一转换）。
 
 ```ts
-// 返回 { run, stop, error }；run(url, body) 发 POST 并把每帧 JSON 交给 onEvent
+// ---- 透传类型（与 09 state.py / 11-15 输出同形，snake_case 照写） ----
+interface Step { tool: string; args: Record<string, unknown> }
+interface ExecutedStep { tool: string; status: string; result: unknown }
+
+// SSE 快照：stream_mode="values" 逐节点追加字段，故全可选
+interface AgentState {
+  query?: string;
+  correlation_id?: string;
+  intent?: string;
+  categories?: string[];
+  plan?: Step[];
+  steps?: ExecutedStep[];
+  report?: string;
+}
+
+// 五种工具结果（ResultChart 按 result_type 分发后交给对应 *Option）
+interface BoxplotResult {
+  gene: string;
+  samples: Record<string, number[]>;
+  summary: Record<string, { n: number; mean: number; median: number; sd: number | null }>;
+  p_value: number | null;
+}
+interface VolcanoResult {
+  genes: { gene: string; logFC: number; p_value: number; adj_p_value: number }[];
+}
+interface EnrichmentRow { id: string; term: string; p_value: number; adj_p_value: number; gene_count: number }
+interface BarplotResult { go: EnrichmentRow[]; kegg: EnrichmentRow[] }
+interface NetworkResult {
+  nodes: { id: string; degree: number }[];
+  edges: { source: string; target: string; score: number }[];
+}
+interface KmCurveResult {
+  km_curves: { group: string; time: number[]; survival: number[] }[];
+  logrank_p: number;
+  cox_hr: number;
+  cox_p: number;
+}
+
+// /tools 响应（ToolDefinition 的透传；input_schema / frontend.result_type 是 wire key，不 camelCase 化）
+interface ToolMeta {
+  name: string;
+  description: string;
+  category: string;
+  runtime: string;
+  input_schema: Record<string, unknown>;
+  frontend: { result_type?: string };
+}
+
+// ---- 前端领域类型（camelCase；client.ts 把后端 snake_case → camelCase） ----
+interface Message { role: 'user' | 'assistant'; content: string }
+interface UploadResult { fileId: string; originalName: string; size: number }
+interface TaskSummary { id: string; userMessage: string; status: string; createdAt: number; updatedAt: number }
+interface TaskDetail extends TaskSummary {
+  plan: Step[];
+  steps: ExecutedStep[];
+  report: string;
+  error: string | null;
+}
+```
+
+### 端点与 `api/client.ts`（5 端点）
+
+| 方法 | 路径 | client 函数 | 返回 |
+|---|---|---|---|
+| POST | `/chat` | `chatSSE`（经 `useSSE`） | SSE 流（`AgentState` 快照帧） |
+| GET | `/tasks` | `listTasks` | `TaskSummary[]` |
+| GET | `/tasks/{task_id}` | `getTask` | `TaskDetail` |
+| POST | `/uploads` | `upload` | `UploadResult` |
+| GET | `/tools` | `listTools` | `ToolMeta[]` |
+
+`client.ts` 是 snake_case → camelCase 的唯一转换点（`file_id`→`fileId`、`original_name`→`originalName`、`user_message`→`userMessage`、`created_at`→`createdAt`、`updated_at`→`updatedAt`）；SSE 快照与工具结果属透传，不转换。
+
+### `hooks/useSSE.ts`
+
+```ts
+// 返回 { run, stop, error }。run() 发 POST，用 fetch + response.body.getReader() 逐行读流，
+// 按 "\n\n" 切帧、每帧去掉 "data: " 前缀后 JSON.parse，再按帧内容分派：
+//   - 帧含 "done" 键   → resolve（正常结束）
+//   - 帧含 "error" 键  → 置 error 并 reject
+//   - 否则             → 整帧是完整状态快照，onEvent(snapshot)
+// 非 200（!resp.ok）→ 置 error；stop() 调 reader.cancel() 中止读取。
 export function useSSE(onEvent: (snapshot: AgentState) => void): {
   run: (url: string, body: unknown) => Promise<void>;
   stop: () => void;
@@ -79,11 +164,11 @@ export function useSSE(onEvent: (snapshot: AgentState) => void): {
 ### `charts/options.ts`（纯函数签名）
 
 ```ts
-export function boxplotOption(data: any): echarts.EChartsOption;
-export function volcanoOption(data: any): echarts.EChartsOption;
-export function barplotOption(data: any): echarts.EChartsOption;
-export function networkOption(data: any): echarts.EChartsOption;
-export function kmCurveOption(data: any): echarts.EChartsOption;
+export function boxplotOption(data: BoxplotResult): echarts.EChartsOption;
+export function volcanoOption(data: VolcanoResult): echarts.EChartsOption;
+export function barplotOption(data: BarplotResult): echarts.EChartsOption;
+export function networkOption(data: NetworkResult): echarts.EChartsOption;
+export function kmCurveOption(data: KmCurveResult): echarts.EChartsOption;
 ```
 
 ### `stores/chatStore.ts`（Zustand，签名）
@@ -103,7 +188,7 @@ interface ChatState {
   - [ ] `options.ts` 纯函数：五种 `*Option` 各返回确定性 option（同输入同输出、含期望的 series.type、无 `undefined` 关键字段）；`volcanoOption` 对空 genes 返回空 series 不抛
   - [ ] `useSSE`：mock `fetch` 返回含多帧 `data: {...}\n\n` 的流 → `onEvent` 按帧逐次收到 JSON；非 200 抛/置 error；`stop()` 中止 reader
   - [ ] `chatStore`：`send` 把用户消息入 messages、`currentState` 随帧更新、末帧含 report 后 status='done'
-  - [ ] `ResultChart` 分发：`result_type="volcano"` 渲染 scatter；未知类型渲染 JSON 而非崩
+  - [ ] `ResultChart` 分发：给定 `tool→result_type` 映射（`limma_dge`→`volcano`）+ 一个 `step`（`tool="limma_dge"`）→ 渲染 scatter；未知 result_type → 渲染 JSON 而非崩
   - [ ] `FileUpload`：mock `client.upload` → 成功后写 `uploadStore.fileId`
 - [ ] 集成测试：无（不真起后端；所有端点经 `client.ts` 层 mock）
 - [ ] E2E 测试：无（Playwright 不在 MVP）

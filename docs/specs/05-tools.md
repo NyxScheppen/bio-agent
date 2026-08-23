@@ -53,8 +53,8 @@ class ToolRegistry:
             raise ValueError(f"Duplicate tool name: {tool.name}")
         # 执行契约：R 工具只声明 r_script（run=None），Python 工具只声明 run（r_script=None）
         if tool.runtime is Runtime.R:
-            if tool.r_script is None or tool.run is not None:
-                raise ValueError(f"R 工具 {tool.name} 必须声明 r_script 且 run 为 None")
+            if not tool.r_script or tool.run is not None:   # r_script 非空：None 与 "" 都拒绝
+                raise ValueError(f"R 工具 {tool.name} 必须声明非空 r_script 且 run 为 None")
         elif tool.run is None or tool.r_script is not None:
             raise ValueError(f"Python 工具 {tool.name} 必须声明 run 且 r_script 为 None")
         self._tools[tool.name] = tool
@@ -91,12 +91,12 @@ class ToolRegistry:
 
 - [ ] 单元测试 `tests/test_tools/`：
   - [ ] `register` / `get`：注册后 `get(name)` 返回同一实例；`get("nope")` → `KeyError`；重名 `register` → `ValueError`
-  - [ ] `register` runtime 契约：R 工具 `r_script=None` → `ValueError`；R 工具 `run` 非空 → `ValueError`；Python 工具 `run=None` → `ValueError`；Python 工具带 `r_script` → `ValueError`；合规的 Python/R 工具正常注册
+  - [ ] `register` runtime 契约：R 工具 `r_script=None` → `ValueError`；R 工具 `r_script=""` → `ValueError`；R 工具 `run` 非空 → `ValueError`；Python 工具 `run=None` → `ValueError`；Python 工具带 `r_script` → `ValueError`；合规的 Python/R 工具正常注册
   - [ ] `for_categories`：注册 3 个工具（`Category.SINGLE_GENE` / `Category.DGE` / `Category.DGE`），`for_categories({Category.DGE})` 只返回 2 个 DGE 工具；空集合返回空
   - [ ] `all_tools` / `__iter__` / `__len__`：注册 N 个 → `len == N`、`all_tools()` 长度一致、迭代遍数一致
 - [ ] 集成测试 `tests/test_tools/`（fixture 包）：
   - [ ] `discover`：在 `tests/fixtures/fake_tools/`（含 `dge_foo.py` 导出 `TOOL`、`__init__.py` 不导出、一个导出非 `ToolDefinition` 的 `JUNK` 模块）上 `discover("tests.fixtures.fake_tools")` → 只注册 `dge_foo` 的 `TOOL`，`JUNK` 被跳过
-  - [ ] `discover` 幂等：同一 package 连跑两次不报错（不会因重名炸——第二次 `register` 撞同名会 `ValueError`，故测试用空 registry 各跑一次，或断言第二次抛 `ValueError` 属预期）
+  - [ ] `discover` 非幂等（生产只调一次）：同一 registry 重复 `discover` 同一 package → 第二次 `register` 撞同名抛 `ValueError`（属预期，非幂等）；测试用空 registry 各跑一次覆盖发现正确性
 - [ ] E2E 测试：无
 
 ## 完成定义

@@ -33,7 +33,7 @@
 - **落库（本 spec 自己写）**：`complete()` 每次调用写一行 `token_usage`（`id`=output.id、`correlation_id`、`module`、`purpose`=output_type、`model`、token 用量、`created_at`），**best-effort**（写失败记日志、照常返回 `LLMOutput`，记账是观测、主流程正确性不依赖它——见 CLAUDE.md 观测豁免）。eval 只产 `EvalReport` 分数、不再写 token_usage（见 08-eval）
 - **多 provider（OpenAI 兼容）**：`from_config` 用 `_resolve_base_url(provider, base_url)` 解析 endpoint——显式 `llm.base_url` 优先，否则查内置映射（deepseek / openai / ollama）；无命中报 `ConfigError`（列出内置 provider + 提示配 `llm.base_url`）。统一走 `ChatOpenAI`，token 抽取不变
 - **不设超时/重试**：LangChain 默认，异常原样上抛由调用方处理
-- **json_mode = 减少 parse 失败重试**：router 意图分类 / planner 规划 / reporter 结构化输出都要 JSON，靠 `response_format` 保证合法 JSON，少一次重调
+- **json_mode = 减少 parse 失败重试**：router 意图分类 / planner 规划 / reporter 结构化输出都要 JSON，靠 `response_format` 保证合法 JSON，少一次重调。**调用方（09-orchestration 的 prompt）必须含「json」字样**——OpenAI/DeepSeek 的 `response_format={"type":"json_object"}` 要求 prompt 出现「json」否则 API 报错，04-llm 只传 response_format、不背 prompt 的锅
 - **依赖 pin（实现时锁）**：`pyproject.toml` 里 `langchain-core`、`langchain-openai` 锁精确版本（非 `>=` 宽范围）；`pydantic` 用 `>=2.0` floor。本 spec 的 `usage_metadata`（键 `input_tokens`/`output_tokens`）、`AIMessage.content`（文本为 `str`）、`response_format={"type":"json_object"}` 契约均以锁定版本为准，升级依赖须重跑本 spec 测试
 - **类型收窄（质量门驱动）**：`_extract_usage` 里 `isinstance(usage, dict)` 把 `getattr` 返回的 `Any` 收窄成 `dict[Unknown, Unknown]`，赋给 `dict[str, Any]` 报 partially unknown，故 `cast(dict[str, Any], usage)`（与 02-config `_build` 同模式）；`from_config` 里 `api_key` 用 `SecretStr(api_key)` 包装——langchain-openai 的 `api_key` 别名类型是 `SecretStr | Callable | None`，plain `str` 不满足 pyright strict，`SecretStr` 顺带让密钥不进 repr/日志
 
@@ -58,7 +58,7 @@ from bioagent.types import LLMOutput, TokenUsageDict
 log = logging.getLogger(__name__)
 
 
-# role 是 LLM 消息角色（system/user/assistant），与 01-types 的 Message 无关
+# role 是 LLM 消息角色（system/user/assistant）
 class LlmMessage(TypedDict):
     role: Literal["system", "user", "assistant"]
     content: str
@@ -134,8 +134,9 @@ class LlmClient:
                 f"或使用内置 provider：{sorted(_PROVIDER_BASE_URLS)}"
             )
         api_key = os.environ.get(config.api_key_env)
-        if not api_key:
+        if not api_key and config.provider != "ollama":
             raise ConfigError(f"环境变量 {config.api_key_env} 未设置")
+        api_key = api_key or "ollama"  # ollama 本地无鉴权：dummy 值仅满足 ChatOpenAI 非空约束
         return cls(
             ChatOpenAI(
                 model=config.model,
@@ -213,7 +214,7 @@ class LlmClient:
     - [ ] `token_usage` 行写入（fake db：`conn.execute` 记录 SQL 参数、`commit` 计数）：`complete()` 后 fake db 收到 1 条 `INSERT INTO token_usage`，`id==output.id`、`purpose==output_type`、`module`/`model`/token 用量正确
     - [ ] 记账失败 best-effort：fake db 的 `execute` 抛异常 → `complete()` 仍返回 `LLMOutput`（不重抛），记日志
   - [ ] `_resolve_base_url` 纯函数：显式 `base_url` 优先 / 已知 provider 命中 / 未知 provider 返回 `None`
-  - [ ] `from_config`（`monkeypatch` 环境变量 + 注入 fake `Database`）：`provider="claude"`（无 base_url）→ `ConfigError`；`api_key_env` 未设（`delenv`）→ `ConfigError`；正常 → 返回 `LlmClient` 且 `_model_name == config.model`（`setenv` 设 key）；`provider="openai"` → 正常返回；自定义 `base_url` → 正常返回
+  - [ ] `from_config`（`monkeypatch` 环境变量 + 注入 fake `Database`）：`provider="claude"`（无 base_url）→ `ConfigError`；`api_key_env` 未设且非 ollama（`delenv`）→ `ConfigError`；`provider="ollama"` + 无 key → 正常返回（api_key 用 dummy `"ollama"`）；正常 → 返回 `LlmClient` 且 `_model_name == config.model`（`setenv` 设 key）；`provider="openai"` → 正常返回；自定义 `base_url` → 正常返回
 - [ ] 集成测试：无（`LlmClient` 是内部类，无 Facade 管道；不测真实 LLM）
 - [ ] E2E 测试：无
 

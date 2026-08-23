@@ -9,7 +9,7 @@
 
 - **包根路径**：Python 包 `bioagent` 源码在 `backend/bioagent/`，import 为 `bioagent.xxx`（`backend/` 在 sys.path 上）
 - **前置依赖**：01-types（`ToolDefinition`/`Category`/`Runtime`）、05-tools（`discover()` 自动发现）
-- **无循环依赖**：本 spec 不 import 任何 `bioagent` 模块，只 import 第三方（pandas/scipy）；只被 `discover()` 被动发现
+- **无循环依赖**：本 spec 只 import 纯类型/枚举叶子模块（`bioagent.enums`/`bioagent.types`，无回边）+ 第三方（pandas/scipy），不 import 任何编排/执行模块；只被 `discover()` 被动发现
 
 ## 用户故事
 
@@ -19,7 +19,7 @@
 
 - [ ] `backend/bioagent/tools/single_gene/expression.py` 导出 `TOOL`（`ToolDefinition`，`category==Category.SINGLE_GENE`、`runtime==Runtime.PYTHON`、`run` 非空、`r_script is None`），与「工具定义」段逐字一致
 - [ ] `run(matrix_file, gene, groups)` 读 TSV 矩阵、按 `groups` 分组、算 `samples`（组→每样本值）+ `summary`（组→{n, mean, median, sd}）+ `p_value`（恰两组时 t 检验）
-- [ ] 基因不在矩阵 → `ValueError`；组数非 2 → `p_value=None`（不报错）
+- [ ] 基因或样本名不在矩阵、或空组（n=0）→ `ValueError`；组数非 2 或任一组 n=1 → `p_value=None`（n=1 的组 `sd=None`），不产 NaN
 - [ ] 输出所有数值是 Python 原生类型（numpy 标量已 `float()`/`.tolist()`，可 `json.dumps`）
 - [ ] `pyright` strict 零报错
 
@@ -49,21 +49,27 @@ async def run(matrix_file: str, gene: str, groups: dict[str, list[str]]) -> dict
     df = pd.read_csv(matrix_file, sep="\t", index_col=0)
     if gene not in df.index:
         raise ValueError(f"基因 {gene} 不在表达矩阵中")
+    all_samples = [s for cols in groups.values() for s in cols]
+    missing = set(all_samples) - set(df.columns)
+    if missing:
+        raise ValueError(f"样本 {missing} 不在矩阵中")
     row = df.loc[gene].astype(float)
     samples: dict[str, list[float]] = {}
     summary: dict[str, dict[str, Any]] = {}
     for group, cols in groups.items():
+        if not cols:
+            raise ValueError(f"组 {group} 无样本")
         vals = row[cols].tolist()
         samples[group] = vals
         summary[group] = {
             "n": len(vals),
             "mean": float(row[cols].mean()),
             "median": float(row[cols].median()),
-            "sd": float(row[cols].std()),
+            "sd": None if len(vals) < 2 else float(row[cols].std()),
         }
     p_value: float | None = None
     names = list(groups)
-    if len(names) == 2:
+    if len(names) == 2 and all(len(samples[n]) >= 2 for n in names):
         p_value = float(stats.ttest_ind(samples[names[0]], samples[names[1]]).pvalue)
     return {"gene": gene, "samples": samples, "summary": summary, "p_value": p_value}
 
@@ -108,6 +114,9 @@ TOOL = ToolDefinition(
   - [ ] `run` 成功：写 3 基因 × 6 样本矩阵、`groups={"case":["s1","s2","s3"],"control":["s4","s5","s6"]}` → 返回 `samples` 两组各 3 值、`summary` 两组各 {n=3, mean, median, sd}、`p_value` 是 float
   - [ ] `p_value` 非 None 且 ∈ [0,1]；`samples`/`summary` 的数值都是 Python `float`/`int`（`json.dumps(result)` 不抛）
   - [ ] 基因不存在 → `ValueError`（消息含基因名）
+  - [ ] 样本名不在矩阵（如 `groups={"case":["s1","sX"]}`）→ `ValueError`（消息含样本名）
+  - [ ] 空组（n=0，如 `groups={"case":[],"control":["s1","s2"]}`）→ `ValueError`（消息含组名）
+  - [ ] 单样本组（n=1，如 `groups={"case":["s1"],"control":["s2","s3"]}`）→ 该组 `sd is None`、`p_value is None`（非 `nan`），`json.dumps(result)` 不抛
   - [ ] 组数非 2（给 3 组）→ `p_value is None`，但 `samples`/`summary` 仍返回
   - [ ] `TOOL` 形状：`category is Category.SINGLE_GENE`、`runtime is Runtime.PYTHON`、`run is not None`、`r_script is None`、`name == "single_gene_expression"`
 - [ ] 集成测试：无（不触编排）

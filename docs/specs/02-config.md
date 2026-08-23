@@ -7,6 +7,7 @@
 ## 元信息
 
 - **包根路径**：Python 包 `bioagent` 源码在 `backend/bioagent/`，import 为 `bioagent.xxx`（`backend/` 在 sys.path 上）
+- **CWD 约定**：`config.yaml` 与所有相对路径（`db.db_path`、`storage.upload_dir`、`storage.r_scripts_dir`）均以**仓库根**为 CWD，进程须从仓库根启动——否则 `config.yaml` 找不到、`backend/bioagent/r_scripts` 会误解析成 `backend/backend/bioagent/r_scripts`
 - **前置依赖**：无（配置项内联在本文件）
 
 ## 用户故事
@@ -25,7 +26,7 @@
 
 - **新文件**：`backend/bioagent/config.py`、`config.yaml`（无 Facade、无 API、无数据变更）
 - **库**：PyYAML（`yaml.safe_load`）
-- **公开面**：`from bioagent.config import Config, load_config, validate_config`（不加 `__all__`）
+- **公开面**：`from bioagent.config import Config, load_config, validate_config`（不加 `__all__`；`ConfigError` 与各分段 dataclass 如 `LlmConfig` 也直接可导，04-llm 会 import）
 - **同步加载**（启动时一次性，event loop 未起，非运行期 I/O）
 - **递归构造**：`_build` 看到字段类型是 dataclass 就递归构造，所以嵌套段会变成对应 dataclass
 - **类型标注**：`_build` 用 `Any`（`dc: Any, raw: Any -> Any`）而非泛型 `_T`——`dataclasses.Field.type` 与 `yaml.safe_load` 都返回 `Any`，pyright strict 下 `type[_T]` 不满足 `DataclassInstance` 协议、返回类型无法静态验证。用 `Any` + `cast(dict[str, Any], raw)` 诚实承认反射构造是动态的，不假装类型精确。
@@ -35,7 +36,7 @@
 
 ```yaml
 llm:
-  provider: deepseek          # deepseek | openai | ollama；其它 OpenAI 兼容服务配 base_url
+  provider: deepseek          # deepseek | openai | ollama（04-llm 内置映射键）；校验只查非空，未知 provider 由 04-llm 构造时报错——其它 OpenAI 兼容服务配 base_url 即可
   model: deepseek-chat
   api_key_env: DEEPSEEK_API_KEY
   # base_url: http://localhost:11434/v1   # 可选：覆盖/自定义 endpoint
@@ -79,7 +80,7 @@ class LlmConfig:
     provider: str = "deepseek"
     model: str = "deepseek-chat"
     api_key_env: str = "DEEPSEEK_API_KEY"  # 存环境变量名，key 本体由 04-llm 读
-    base_url: str | None = None            # 可选 endpoint 覆盖；缺省查 provider 映射
+    base_url: str | None = None            # 可选 endpoint 覆盖；缺省查 provider 映射（映射表在 04-llm，本 spec 不定义）
 
 
 @dataclass
@@ -189,6 +190,10 @@ def validate_config(cfg: Config) -> None:
     _nonempty(cfg.rag.qdrant_url, "rag.qdrant_url")
     _nonempty(cfg.rag.collection, "rag.collection")
 
+    # 可选 str：None 放行（走 provider 映射，见 04-llm），非 None 时非空
+    if cfg.llm.base_url is not None:
+        _nonempty(cfg.llm.base_url, "llm.base_url")
+
     # int > 0
     _pos_int(cfg.rag.top_k, "rag.top_k")
 
@@ -212,7 +217,7 @@ def validate_config(cfg: Config) -> None:
 ## 测试要点
 
 - [ ] 单元测试 `tests/test_config/`：
-  - [ ] `validate_config` 纯函数：合法 `Config()` 通过；越界值（`judge_sample_rate=1.5`）报错；非正（`top_k=0`）报错；错类型（改字段为 `"20"` / `True`）报错（直接构造 `Config` 后改字段再调 `validate_config`）
+  - [ ] `validate_config` 纯函数：合法 `Config()` 通过；越界值（`judge_sample_rate=1.5`）报错；非正（`top_k=0`）报错；错类型（改字段为 `"20"` / `True`）报错；`base_url=None` 通过、`base_url=""` 报错（直接构造 `Config` 后改字段再调 `validate_config`）
   - [ ] `load_config`（tmp yaml + `monkeypatch` 环境变量）：
     - [ ] 缺键填默认（只写 `llm.provider` → 其余字段=默认）
     - [ ] 未知顶层键 / 段内键报 `ConfigError`

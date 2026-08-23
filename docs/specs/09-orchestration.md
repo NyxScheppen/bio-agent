@@ -146,7 +146,7 @@ def make_router_node(client: LlmClient) -> Node:
     async def router(state: AgentState) -> dict[str, Any]:
         allowed = [c.value for c in Category]  # 数据驱动，不写死类别列表
         output = await client.complete(
-            [_system(_ROUTER_PROMPT.format(query=state["query"], allowed=allowed))],
+            [_system(_ROUTER_PROMPT.format(query=state["query"], allowed=json.dumps(allowed)))],
             module="router",
             output_type="intent",
             correlation_id=state["correlation_id"],

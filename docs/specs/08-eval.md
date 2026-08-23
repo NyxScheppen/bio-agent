@@ -2,12 +2,12 @@
 
 > 范围：`backend/bioagent/eval/judge.py`（`judge_report` / `judge_tool_call` / `parse_scores`）+ `backend/bioagent/eval/evaluate.py`（`evaluate_report` / `evaluate_tool_call` / `_record`）。
 > 纯基础设施 spec：「两者都判」= 报告质量 judge（format/relevance/completeness）+ 工具调用 judge（intent_correct/tool_correct），各产出一个 `EvalReport`；token 记账由 04-llm 的 `complete()` 统一做，本 spec 不写 `token_usage`。
-> `LLMOutput` / `EvalScores` / `EvalReport` / `TokenUsageDict` 取自 01-types；`LlmClient` 取自 04-llm；`Database` / `eval_report` 表取自 03-db（`token_usage` 表归 04-llm 写）。
+> `LLMOutput` / `EvalScores` / `EvalReport` 取自 01-types；`LlmClient` 取自 04-llm；`Database` / `eval_report` 表取自 03-db（`token_usage` 表归 04-llm 写）。
 
 ## 元信息
 
 - **包根路径**：Python 包 `bioagent` 源码在 `backend/bioagent/`，import 为 `bioagent.xxx`（`backend/` 在 sys.path 上）
-- **前置依赖**：01-types（`EvalScores` / `EvalReport` / `LLMOutput` / `TokenUsageDict`）、02-config（`EvalConfig.judge_sample_rate` 由编排层读，非本 spec）、03-db（`Database` + `eval_report` 表）、04-llm（`LlmClient`）
+- **前置依赖**：01-types（`EvalScores` / `EvalReport` / `LLMOutput`）、02-config（`EvalConfig.judge_sample_rate` 由编排层读，非本 spec）、03-db（`Database` + `eval_report` 表）、04-llm（`LlmClient`）
 
 ## 用户故事
 
@@ -48,7 +48,7 @@ _REPORT_PROMPT = """你是生物信息学报告质量评审。给 3 个 0-1 分�
 - format：格式规范性（markdown 结构、图表/表格引用）
 - relevance：与用户问题的相关度
 - completeness：是否完整覆盖用户问题
-只输出 JSON 对象，如 {"format": 0.9, "relevance": 0.8, "completeness": 0.7}
+只输出 JSON 对象，如 {{"format": 0.9, "relevance": 0.8, "completeness": 0.7}}
 
 用户问题：{query}
 
@@ -59,7 +59,7 @@ _REPORT_PROMPT = """你是生物信息学报告质量评审。给 3 个 0-1 分�
 _TOOL_PROMPT = """你是生物信息学 agent 的工具调用评审。给 2 个 0-1 分：
 - intent_correct：意图分类（intent）是否命中用户真实诉求
 - tool_correct：所选工具是否适合该问题
-只输出 JSON 对象，如 {"intent_correct": 1.0, "tool_correct": 0.5}
+只输出 JSON 对象，如 {{"intent_correct": 1.0, "tool_correct": 0.5}}
 
 用户问题：{query}
 意图分类：{intent}
@@ -93,7 +93,7 @@ async def judge_tool_call(
 ) -> LLMOutput:
     """跑工具调用 judge，返回原始 LLMOutput（content 为 JSON 分数）。"""
     return await client.complete(
-        [_system(_TOOL_PROMPT.format(query=query, intent=intent, tool_calls=tool_calls))],
+        [_system(_TOOL_PROMPT.format(query=query, intent=intent, tool_calls=json.dumps(tool_calls)))],
         module="eval",
         output_type="eval",
         correlation_id=correlation_id,

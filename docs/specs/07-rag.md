@@ -94,7 +94,7 @@ class RagClient:
             limit=self._top_k,
         )
         return [
-            {"text": point.payload["text"], "score": point.score}
+            {"text": (point.payload or {}).get("text", ""), "score": point.score}
             for point in result.points
         ]
 
@@ -107,6 +107,7 @@ class RagClient:
 - [ ] 单元测试 `tests/test_rag/`（`pytest-asyncio`，注入 fake `Embedder` 与 fake `AsyncQdrantClient`）：
   - [ ] `Embedder.embed`：注入 fake `SentenceTransformer`（`encode` 返回预设 numpy 向量）→ `embed("x")` 返回 `list[float]`；`dim` 返回 `get_sentence_embedding_dimension()` 的值
   - [ ] `RagClient.query`：fake client 的 `query_points` 记录 `collection_name`/`query`（= fake embedder 返回的向量）/`limit`（= top_k）；返回预设 points → `query()` 输出 `[{"text", "score"}]`
+  - [ ] `RagClient.query` 兜底：返回的 point `payload=None` 或 `payload` 缺 `"text"` → 不崩，对应 `text` 为 `""`（`score` 仍照填）
   - [ ] `RagClient.ingest`：fake `upload_points` 记录 points（id/vector/payload）；返回 `len(documents)`；空列表 → 返回 0 且不调 `upload_points`
   - [ ] `RagClient.ensure_collection`：`collection_exists` 返回 `False` → 调 `create_collection`（dim = embedder.dim、COSINE）；返回 `True` → 不调
   - [ ] `RagClient.close` 调 `client.close()`

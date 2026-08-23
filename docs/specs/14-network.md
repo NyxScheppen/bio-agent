@@ -8,7 +8,7 @@
 
 - **包根路径**：Python 包 `bioagent` 源码在 `backend/bioagent/`，import 为 `bioagent.xxx`（`backend/` 在 sys.path 上）
 - **前置依赖**：01-types、05-tools（自动发现）
-- **无循环依赖**：本 spec 不 import 任何 `bioagent` 模块，只 import 第三方（networkx/httpx）
+- **无循环依赖**：本 spec 只 import 纯类型/枚举叶子模块（`bioagent.enums`/`bioagent.types`，无回边）+ 第三方（networkx/httpx），不 import 任何编排/执行模块
 
 ## 用户故事
 
@@ -17,7 +17,7 @@
 ## 验收标准
 
 - [ ] `ppi.py` 导出 `TOOL`（`category==Category.NETWORK`、`runtime==Runtime.PYTHON`、`run` 非空、`r_script is None`），与「工具定义」段逐字一致
-- [ ] `run(gene_list, species)` 调 STRING `network` 端点、解析 TSV、建 `nx.Graph`、返回 `{"nodes": [{id, degree}], "edges": [{source, target, score}]}`
+- [ ] `run(gene_list)` 调 STRING `network` 端点、解析 TSV、建 `nx.Graph`、返回 `{"nodes": [{id, degree}], "edges": [{source, target, score}]}`
 - [ ] 按 header 名取列（不依赖列顺序）；只保留 gene_list 内的边
 - [ ] 输出所有数值 Python 原生类型（`float`/`int`），可 `json.dumps`
 - [ ] `pyright` strict 零报错
@@ -26,7 +26,8 @@
 
 - **新文件**：`backend/bioagent/tools/network/__init__.py`（空）、`backend/bioagent/tools/network/ppi.py`
 - **库**：`networkx`（图 + degree）、`httpx`（异步调 STRING API）；锁精确版本
-- **数据源 STRING**：`https://string-db.org/api/tsv/network`，`identifiers`（CR 拼接）+ `species`（默认 9606 = 人）。**需运行时联网**；实现时锁 STRING API 的返回列名（`preferredName_A`/`preferredName_B`/`score`），测试用 fixture 不真调 STRING。
+- **数据源 STRING**：`https://string-db.org/api/tsv/network`，`identifiers`（CR 拼接）+ `species`（写死 9606 = 人）。**需运行时联网**；实现时锁 STRING API 的返回列名（`preferredName_A`/`preferredName_B`/`score`），测试用 fixture 不真调 STRING。
+- **human-only（MVP）**：`species` 写死 `9606`，不加 species 参数。多物种 = 改 `species` 整数，是「未请求的灵活性」，不做——与 13 的 organism 写死对齐。
 - **httpx 直连（非 LLM）**：CLAUDE.md「不直接使用 httpx」只约束 LLM 调用（走 04-llm）；STRING 是外部数据 API，`httpx.AsyncClient` 合法。`run` 里 `async with httpx.AsyncClient()` 每次新建客户端（工具无注入、不持长连接），MVP 一次请求够用。
 - **测试不触网**：`run` 直调 `httpx.AsyncClient.get`，测试用 `monkeypatch`/`respx` 换掉 `httpx.AsyncClient` 返回 fixture TSV，不真连 STRING。
 
@@ -42,12 +43,14 @@ from bioagent.enums import Category, Runtime
 from bioagent.types import ToolDefinition
 
 
-async def run(gene_list: list[str], species: int = 9606) -> dict[str, Any]:
+async def run(gene_list: list[str]) -> dict[str, Any]:
     """基因列表 → STRING PPI 网络（节点 + 边）。只保留 gene_list 内部的互作。"""
+    if not gene_list:
+        return {"nodes": [], "edges": []}
     async with httpx.AsyncClient() as client:
         resp = await client.get(
             "https://string-db.org/api/tsv/network",
-            params={"identifiers": "\r".join(gene_list), "species": str(species)},
+            params={"identifiers": "\r".join(gene_list), "species": "9606"},
         )
         resp.raise_for_status()
     lines = resp.text.strip().splitlines()
@@ -81,10 +84,6 @@ TOOL = ToolDefinition(
                 "type": "array",
                 "items": {"type": "string"},
                 "description": "基因/蛋白 symbol 列表",
-            },
-            "species": {
-                "type": "integer",
-                "description": "NCBI taxonomy id（默认 9606 = 人）",
             },
         },
         "required": ["gene_list"],

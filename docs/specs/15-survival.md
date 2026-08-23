@@ -8,7 +8,7 @@
 
 - **包根路径**：Python 包 `bioagent` 源码在 `backend/bioagent/`，import 为 `bioagent.xxx`（`backend/` 在 sys.path 上）
 - **前置依赖**：01-types、06-r-runner、05-tools（自动发现）
-- **无循环依赖**：本 spec 不 import 任何 `bioagent` 模块（R 工具声明式，`run=None`）
+- **无循环依赖**：本 spec 只 import 纯类型/枚举叶子模块（`bioagent.enums`/`bioagent.types`，无回边），不 import 任何编排/执行模块（R 工具声明式，`run=None`）
 
 ## 用户故事
 
@@ -19,6 +19,7 @@
 - [ ] `km_cox.py` 导出 `TOOL`（`category==Category.SURVIVAL`、`runtime==Runtime.R`、`r_script=="km_cox.R"`、`run is None`），与「工具定义」段逐字一致
 - [ ] `km_cox.R` 读 stdin JSON、读临床表、`survfit`（KM）+ `survdiff`（log-rank）+ `coxph`（Cox）、`cat(toJSON(...))` 输出，与「R 脚本」段逐字一致
 - [ ] 输出 `{"km_curves": [{group, time, survival}], "logrank_p", "cox_hr", "cox_p"}`
+- [ ] 临床表缺列（time/event/group 任一不存在）或 group 非恰 2 组 → `stop`（非零退出，06-r-runner 转 `RRuntimeError`）
 - [ ] `pyright` strict 零报错（工具定义文件）
 
 ## 技术方案
@@ -80,9 +81,17 @@ event_col <- if (is.null(args$event_col)) "event" else args$event_col
 group_col <- if (is.null(args$group_col)) "group" else args$group_col
 
 clin <- read.delim(args$clinical_file, row.names = 1, check.names = FALSE)
+for (col in c(time_col, event_col, group_col)) {
+  if (!(col %in% colnames(clin))) {
+    stop("临床表缺少列: ", col)
+  }
+}
 time <- as.numeric(clin[[time_col]])
 event <- as.numeric(clin[[event_col]])
 group <- factor(clin[[group_col]])
+if (length(levels(group)) != 2) {
+  stop("group 需恰 2 组")
+}
 
 surv_obj <- survival::Surv(time, event)
 fit <- survival::survfit(surv_obj ~ group)
@@ -94,7 +103,7 @@ for (i in seq_along(fit$strata)) {
   n <- fit$strata[i]
   sel <- (idx + 1):(idx + n)
   km_curves[[i]] <- list(
-    group = names(fit$strata)[i],
+    group = jsonlite::unbox(levels(group)[i]),
     time = as.numeric(fit$time[sel]),
     survival = as.numeric(fit$surv[sel])
   )
@@ -110,11 +119,11 @@ cox_p <- as.numeric(summary(cox)$coefficients[1, 5])
 
 result <- list(
   km_curves = km_curves,
-  logrank_p = logrank_p,
-  cox_hr = cox_hr,
-  cox_p = cox_p
+  logrank_p = jsonlite::unbox(logrank_p),
+  cox_hr = jsonlite::unbox(cox_hr),
+  cox_p = jsonlite::unbox(cox_p)
 )
-cat(jsonlite::toJSON(result, auto_unbox = TRUE))
+cat(jsonlite::toJSON(result))
 ```
 
 ## 测试要点
@@ -123,6 +132,8 @@ cat(jsonlite::toJSON(result, auto_unbox = TRUE))
   - [ ] `TOOL` 形状：`category is Category.SURVIVAL`、`runtime is Runtime.R`、`r_script == "km_cox.R"`、`run is None`
   - [ ] `register()` 契约通过（合法 R 工具）
   - [ ] R 脚本（字符串断言，不真跑 R）：含 `Surv`、`survfit`、`survdiff`、`coxph`、`strata` 切片、`cat(jsonlite::toJSON(...))`；断言 `time_col/event_col/group_col` 的默认值回退逻辑存在
+  - [ ] R 脚本校验：含 `%in% colnames(clin)` 缺列 `stop`、`length(levels(group)) != 2` 二组 `stop`（字符串断言；退化输入非零退出）
+  - [ ] R 脚本序列化：含 `jsonlite::unbox`（logrank_p/cox_hr/cox_p/group 单点）、`levels(group)[i]`（group 名去 `group=` 前缀）（字符串断言；时间/生存保持数组、标量显式 unbox）
 - [ ] 集成测试：无（不真跑 Rscript，与 06-r-runner 一致）
 - [ ] E2E 测试：无
 

@@ -38,7 +38,7 @@
 
 1. **计划-执行（plan-and-execute）模型**：planner 用 `json_mode` 一次性产出**顺序步骤序列**，executor 机械执行、**不调 LLM**、不在运行时动态选工具。选它而非 ReAct/function-calling 循环：符合设计文档的「步骤 DAG」、可测（每个节点输入输出确定）、「工具调用 judge」评的是 planner 的规划（`tool_calls` = plan 的步骤）。若要改成 executor 动态 function-calling，属架构变更，先问。
 2. **MVP 步骤是线性的**：plan 是 `list[{tool, args}]`，**没有** `depends_on`、没有并行分支。5 条管线（11-15）天然是「load → 分析 → 返回」的顺序链；前端把线性链画成 DAG 形状（顺序箭头），无需真 DAG/拓扑排序。加 `depends_on`/并行是「未请求的灵活性」，不做。
-3. **eval 内联在节点里**：planner 产出 plan 后调 `evaluate_tool_call`、reporter 产出 report 后调 `evaluate_report`（都按 `sample_rate` 抽样）。节点由此多拿 `db` + `sample_rate` 两个参数——这是为拿到「刚产出的 `LLMOutput`」（eval 需要 `output.id`/`token_usage`）最省事的落点。抽样的确定性：`sample_rate=0.0` 永不评、`1.0` 必评，测试用这两个极端，不 mock `random`。
+3. **eval 内联在节点里**：planner 产出 plan 后调 `evaluate_tool_call`、reporter 产出 report 后调 `evaluate_report`（都按 `sample_rate` 抽样）。节点由此多拿 `db` + `sample_rate` 两个参数——这是为拿到「刚产出的 `LLMOutput`」（eval 需要 `output.id`/`output.module`/`output.correlation_id`）最省事的落点。token 记账由 04-llm 的 `complete()` 自动落，节点不写。抽样的确定性：`sample_rate=0.0` 永不评、`1.0` 必评，测试用这两个极端，不 mock `random`。
 4. **不接 checkpointer（resume 不做）**：`build_graph` 不接收 checkpointer，`compile()` 不带参数。SSE 流式用 `graph.astream()`，**不需要** checkpointer；checkpoint（失败续跑/人机交互）是 MVP 之外的增强。将来要加 = `compile(checkpointer=AsyncSqliteSaver(...))` 一个参数的事，但那是独立文件/独立 sqlite，别和 03-db 的 `task` 表混。
 5. **错误处理 = 异常上抛**：节点里 LLM 坏 JSON、工具抛错、R 非零退出都不捕获，直接向上抛。10-api 捕获后把 task 置 `FAILED`。不做「优雅错误节点 / 部分步骤失败继续」，那会让「报告里混进失败步骤」变成常态，属过度设计。
 6. **`correlation_id = task id`**：10-api 生成 uuid（同时作为 `task` 表主键与 `correlation_id`），注入初始 state，贯穿所有 `client.complete` 调用与 eval 落库，把一次会话的所有 LLM 调用/评测串起来。9 不生成它，只读 `state["correlation_id"]`。

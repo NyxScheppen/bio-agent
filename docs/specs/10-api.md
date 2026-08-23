@@ -19,7 +19,7 @@
 
 - [ ] `main.py` 含 `create_app()`（+ 模块级 `app`）与 lifespan，与「`backend/bioagent/main.py`（完整）」段逐字一致
 - [ ] `api.py` 含 `router` + `ChatRequest`/`TaskSummary`/`TaskDetail` + task CRUD，与「`backend/bioagent/api.py`（完整）」段逐字一致
-- [ ] lifespan 装配：`load_config` → `connect(db_path)` → `LlmClient.from_config` → `ToolRegistry.discover()` → `RRunner` → `Embedder`+`RagClient`+`ensure_collection()` → `build_graph`，全挂到 `app.state`；退出关 `db.conn`
+- [ ] lifespan 装配：`load_config` → `connect(db_path)` → `LlmClient.from_config(cfg.llm, db)` → `ToolRegistry.discover()` → `RRunner` → `Embedder`+`RagClient`+`ensure_collection()` → `build_graph`，全挂到 `app.state`；退出关 `db.conn`
 - [ ] `POST /chat` 建 task → 流式返回 `text/event-stream`：每节点后一条全量 state、结束 `{"done": true}`、失败 `{"error": ...}`，并把 task 置 `COMPLETED`/`FAILED`（失败时 `error` 落库）
 - [ ] `GET /tasks` 按 `created_at` 倒序列任务摘要；`GET /tasks/{id}` 返回完整 plan/steps/report（404 无则）
 - [ ] `POST /uploads` 落盘到 `upload_dir`（uuid 重命名）+ 写 `upload` 表，返回 `{file_id, original_name, size}`
@@ -34,7 +34,7 @@
 
 ### 关键决策（实现者务必读，改动前先问）
 
-1. **task CRUD 归属 10-api（修正 03-db 的映射）**：03-db 的表归属写「orchestration（09，写）+ api（10，读）| task」，但 09 是纯图（不写 task，只经 `evaluate_*` 写 `eval_report`/`token_usage`）。task 的写发生在**图的调用方**（10-api，因为只有它知道「一次会话 = 一个 task」）。故 task 的 create/status/complete/fail 落在 `api.py`，09 不碰 task 表。→ 实现时同步改 03-db 那行映射为「api（10，读写）| task」。
+1. **task CRUD 归属 10-api（03-db 映射已对齐为「api（10，读写）| task」）**：09 是纯图（不写 task，只经 `evaluate_*` 写 `eval_report`；`token_usage` 由 04-llm 写）。task 的写发生在**图的调用方**（10-api，因为只有它知道「一次会话 = 一个 task」）。故 task 的 create/status/complete/fail 落在 `api.py`，09 不碰 task 表。
 2. **RAG 两处接地（lifespan 构造 + 注入图）**：RAG 在 planner + reporter 两处接地（09-orchestration 决策 8）。10-api 在 lifespan 用 `config.embedding.model` 建 `Embedder`、用 `config.rag.*` 建 `RagClient`，`ensure_collection()` 后把 `rag` 传给 `build_graph`。首次启动下载 `all-MiniLM-L6-v2` 模型（较慢）；qdrant 未起时 `ensure_collection()`/检索按 09 决策 5 上抛（启动失败或任务 FAILED）。
 3. **失败落 error 列**：task 表有 `error` 列（`str | None`，03-db 已加）。失败时 `fail_task` 把错误文本写进 `error`，同时走 SSE `error` 事件 + 服务端日志（`log.exception`）；`TaskDetail` 带 `error` 字段，任务历史能回看失败原因。
 4. **task 一次性写**：MVP 只在结束/失败时写一次 plan/steps/report（非每节点增量写）；中途崩溃 task 停在 `RUNNING`。逐节点持久化是「未请求的灵活性」，不做。
@@ -69,7 +69,7 @@ def create_app(config: Config | None = None) -> FastAPI:
     async def lifespan(app: FastAPI):
         cfg = config or load_config()  # 延迟到启动时读，测试可注入
         db = await connect(cfg.db.db_path)
-        client = LlmClient.from_config(cfg.llm)
+        client = LlmClient.from_config(cfg.llm, db)
         registry = ToolRegistry()
         registry.discover()
         runner = RRunner(cfg.storage.r_scripts_dir)

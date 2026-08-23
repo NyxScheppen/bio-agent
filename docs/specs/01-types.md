@@ -113,8 +113,8 @@ class ToolDefinition:
 @dataclass
 class LLMOutput:
     id: str                 # uuid4，由产出方（04-llm）生成
-    module: str             # 产出模块（router/planner/executor/reporter/rag）
-    type: str               # 产出类型（intent/plan/step/report/embedding）
+    module: str             # 产出模块（router/planner/reporter/eval）
+    type: str               # 产出类型（intent/plan/report/eval）
     model: str              # 本次调用所用模型（供 TokenUsage.model）
     content: str            # 原始文本
     token_usage: TokenUsageDict
@@ -136,7 +136,7 @@ class TokenUsage:           # 一次 LLM 调用记账（对应 token_usage 表�
     id: str
     correlation_id: str | None
     module: str
-    purpose: str            # intent / plan / step / report / embedding / eval / ...
+    purpose: str            # intent / plan / report / eval（= LLMOutput.type）
     model: str
     input_tokens: int
     output_tokens: int
@@ -144,6 +144,8 @@ class TokenUsage:           # 一次 LLM 调用记账（对应 token_usage 表�
 ```
 
 **`id` / `created_at` 约定**（跨 dataclass 统一）：所有 `id` 都是 uuid4 字符串（`str(uuid.uuid4())`），由创建该对象的模块生成（如 `LLMOutput` → 04-llm、`EvalReport` → 08-eval）；`created_at` 是 Unix epoch 秒（float，`time.time()`）。类型层只声明字段、不生成 id。
+
+**`EvalReport` 落锚约定**（08-eval 实现必读）：`type="tool_call"` 的 report **锚 planner 的 plan 输出**（`output_id` / `module` = planner 那次 `client.complete` 的 id / `"planner"`）；`intent_correct` 虽是 router 维度，但作为 tool_call judge 的输入之一（`intent` 是普通字符串）与 `tool_correct` 同落这一份 report，router 的 intent 输出**不单独 eval**（但其 token 由 04-llm 照常记入 `token_usage`，`purpose="intent"`）。`type="report"` 锚 reporter 的 report 输出。`EvalReport.token_usage` 存 **judge 本次评测**的 token（= `judge_output.token_usage` 自包含快照，非被评对象 token——后者经 `output_id` 查 `token_usage` 表即可）。
 
 ### 嵌套 dict 字段的边界（哪些收 TypedDict / 哪些留 `dict[str, Any]`）
 

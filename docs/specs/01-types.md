@@ -7,7 +7,7 @@
 ## 元信息
 
 - **前置依赖**：无（全部类型内联在本文件）
-- **包根路径**：Python 包 `bioagent` 的源码在 `backend/bioagent/`（包根），import 为 `bioagent.xxx`（`backend/` 在 sys.path 上）。`backend/bioagent/__init__.py` 为空文件、随包新建；前端是独立的 `frontend/` 目录，不在本包内。注：CLAUDE.md 里 `backend/tools/`、`runners/` 是早期目录写法，对应 `backend/bioagent/tools/`、`backend/bioagent/r_runner.py`（CLAUDE.md 已同步为 `backend/bioagent/`）。
+- **包根路径**：Python 包 `bioagent` 的源码在 `backend/bioagent/`（包根），import 为 `bioagent.xxx`（`backend/` 在 sys.path 上）。`backend/bioagent/__init__.py` 为空文件、随包新建；前端是独立的 `frontend/` 目录，不在本包内。
 - **运行环境 / 工具链**：Python 3.11+（`enum.StrEnum` 是 3.11 新增，本 spec 依赖）。质量门（`ruff check` / `pyright` strict / `pytest`）的工具链配置属「脚手架」交付物（`pyproject.toml` + `pyrightconfig.json`，实现脚手架阶段落地），非本 spec 内联；本 spec 只声明目标：`pyright` strict 零报错、`ruff` 零报错、`pytest` 全绿。
 
 ## 用户故事
@@ -40,9 +40,6 @@ class Category(StrEnum):
 
     加类别 = 加一个成员 + 丢一个工具文件到 backend/bioagent/tools/<category>/，无数据迁移。
     """
-    DATA = "data"                    # 数据加载/预处理（表达矩阵、临床表）
-    KNOWLEDGE = "knowledge"          # 知识库检索（RAG）
-    SYSTEM = "system"                # 系统工具（文件上传、任务历史等）
     SINGLE_GENE = "single_gene"      # 单基因分析
     DGE = "dge"                      # 差异表达分析
     ENRICHMENT = "enrichment"        # 富集分析（GO/KEGG）
@@ -57,7 +54,7 @@ class Runtime(StrEnum):
 
 
 class TaskStatus(StrEnum):
-    """任务状态（task 历史表 + 编排状态机）。"""
+    """任务状态（task 历史表的 status 列，消费方 = 10-api 的 task CRUD）。"""
     PENDING = "pending"
     RUNNING = "running"
     COMPLETED = "completed"
@@ -174,8 +171,7 @@ class TokenUsage:           # 一次 LLM 调用记账（对应 token_usage 表�
 
   ```python
   EXPECTED = {
-      Category: {"data", "knowledge", "system", "single_gene", "dge",
-                 "enrichment", "network", "survival"},
+      Category: {"single_gene", "dge", "enrichment", "network", "survival"},
       Runtime: {"python", "r"},
       TaskStatus: {"pending", "running", "completed", "failed"},
   }

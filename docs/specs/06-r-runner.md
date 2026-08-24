@@ -27,7 +27,7 @@
 - **公开面**：`from bioagent.r_runner import RRunner, RRuntimeError`（不加 `__all__`）
 - **谁持有 runner**：`RRunner` 在组合根（`main.py`，归 10-api）用 `config.storage.r_scripts_dir` 构造一次，注入 09-orchestration 的 executor。R 工具（11-15）的 `ToolDefinition` 只声明 `r_script` 脚本名，`run=None`——不自己碰 subprocess（见 01-types / 05-tools 的 runtime 契约）
 - **为什么列表调用**：`create_subprocess_exec("Rscript", script_path, ...)` 直接传参数列表，不经 shell 解析，防命令注入（`how-security.md` 的 R 子进程安全）
-- **JSON 契约（R 脚本侧）**：脚本读参数 `args <- jsonlite::fromJSON(file("stdin"))`，算完写 `cat(jsonlite::toJSON(result, auto_unbox = TRUE))` 到 stdout。依赖 `jsonlite`（Docker 镜像预装，非本 spec 管）
+- **JSON 契约（R 脚本侧）**：脚本读参数 `args <- jsonlite::fromJSON(file("stdin"))`，算完 `cat(jsonlite::toJSON(...))` 到 stdout。**硬约束：标量必须是 JSON 标量、数组必须保持数组**——data.frame 对象数组（12/13 的 genes/go/kegg）用 `auto_unbox = TRUE` 即可；含可能为 length-1 的原子向量数组（15 的 time/survival）必须逐标量 `jsonlite::unbox()`、数组不加 unbox；两法等价于同一契约。依赖 `jsonlite`（Docker 镜像预装，非本 spec 管）
 - **不做**：不设超时/重试（R 分析时长不定，超时策略留给编排层按需加）；不管理 R 包安装（镜像层职责）；不接受任何用户提供的 R 代码——脚本名是服务端注册表里的固定值
 
 ### `backend/bioagent/r_runner.py`（完整）

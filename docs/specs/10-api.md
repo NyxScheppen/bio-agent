@@ -13,13 +13,13 @@
 
 ## 用户故事
 
-> 作为 bio agent 系统的使用者，我想要 `uvicorn bioagent.main:app` 一条命令起服务，前端能发起一次会话（边跑边看到步骤 DAG 与结果流式推进）、翻看任务历史、上传数据文件、拉取工具清单，以便把 11-15 的生物工具通过前端用起来。
+> 作为 bio agent 系统的使用者，我想要 `uvicorn bioagent.main:app` 一条命令起服务，前端能发起一次会话（边跑边看到线性步骤与结果流式推进）、翻看任务历史、上传数据文件、拉取工具清单，以便把 11-15 的生物工具通过前端用起来。
 
 ## 验收标准
 
 - [ ] `main.py` 含 `create_app()`（+ 模块级 `app`）与 lifespan，与「`backend/bioagent/main.py`（完整）」段逐字一致
 - [ ] `api.py` 含 `router` + `ChatRequest`/`TaskSummary`/`TaskDetail` + task CRUD，与「`backend/bioagent/api.py`（完整）」段逐字一致
-- [ ] lifespan 装配：`load_config` → `connect(db_path)` → `LlmClient.from_config(cfg.llm, db)` → `ToolRegistry.discover()` → `RRunner` → `Embedder`+`RagClient`+`ensure_collection()` → `build_graph`，全挂到 `app.state`；退出关 `db.conn`
+- [ ] lifespan 装配：`load_config` → `connect(db_path)` → `LlmClient.from_config(cfg.llm, db)` → `ToolRegistry.discover()` → `RRunner` → `Embedder`+`RagClient`+`ensure_collection()` → `build_graph`，全挂到 `app.state`；退出关 `rag` 与 `db.conn`
 - [ ] `POST /chat` 建 task → 流式返回 `text/event-stream`：每节点后一条全量 state、结束 `{"done": true}`、失败 `{"error": ...}`，并把 task 置 `COMPLETED`/`FAILED`（失败时 `error` 落库）
 - [ ] `GET /tasks` 按 `created_at` 倒序列任务摘要；`GET /tasks/{id}` 返回完整 plan/steps/report（404 无则）
 - [ ] `POST /uploads` 落盘到 `upload_dir`（uuid 重命名）+ 写 `upload` 表，返回 `{file_id, original_name, size}`
@@ -86,6 +86,7 @@ def create_app(config: Config | None = None) -> FastAPI:
         app.state.graph = graph
         log.info("bioagent ready: %d tools", len(registry))
         yield
+        await rag.close()
         await db.conn.close()
 
     app = FastAPI(title="bioagent", lifespan=lifespan)

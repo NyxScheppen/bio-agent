@@ -46,3 +46,15 @@
   - 回归保护：`from_config` 走 ChatOpenAI 统一封装（非裸 httpx）、显式传 `model_name` 不依赖 LangChain 属性
 - **所属系统**：LLM 客户端（`backend/bioagent/llm/client.py`）
 - **阶段**：spec 04-llm 实现
+
+### 05-tools：工具注册表 + 自动发现
+
+- **新增测试**：
+  - `tests/test_tools/test_tools.py` — `register`/`get`（命中/未命中/重名）3 条、`register` runtime 契约（R 无脚本/空脚本/带 run、Python 无 run/带脚本、合规 P/R）7 条、`for_categories`（过滤/空集合）2 条、`all_tools`/`__iter__`/`__len__` 1 条、`discover`（fixture 包只注册 TOOL、非幂等）2 条
+  - `tests/fixtures/fake_tools/`（`dge_foo.py` 导 `TOOL`、`junk.py` 导非 `ToolDefinition`、`__init__.py` 不导出）— discover 集成测试的 fixture 包
+- **检查方向**：
+  - 功能正确：`register` 后 `get` 返回同一实例、重名抛 `ValueError`；`for_categories` 按类别裁剪、空集合返回空；`all_tools`/迭代/`__len__` 协议一致；`discover` 递归收集 `TOOL` 导出
+  - 边界鲁棒：runtime 契约严格校验（R 工具须非空 `r_script` 且 `run=None`，Python 工具须 `run` 且 `r_script=None`，违反 `ValueError`）；`get` 未命中 `KeyError`；`discover` 跳过不导 `TOOL`/导非 `ToolDefinition` 的模块（`isinstance` 守卫）；`discover` 非幂等（重复注册撞同名 `ValueError`，生产只调一次）
+  - 回归保护：fixture 包验证「加工具 = 加文件」自动发现机制，防止后续工具（11-15）破坏 `discover()`
+- **所属系统**：工具注册表（`backend/bioagent/tools/__init__.py`）
+- **阶段**：spec 05-tools 实现

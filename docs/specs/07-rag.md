@@ -31,13 +31,13 @@
 - **Embedder 是同步纯计算**：sentence-transformers 是 CPU/GPU 计算非 I/O，故 `embed()` 保持同步（符合 CLAUDE.md「纯计算函数保持同步」）。查询时单条短文本、耗时可忽略；**写入（ingest）是离线批量**（seed 脚本/启动时，不在请求路径）
 - **collection 建一次**：`ensure_collection()` 由组合根在启动时调（幂等由 Qdrant 的 `collection_exists` 判定），query/ingest 前不重复建
 - **Qdrant 是 Docker 独立容器**：compose 里 app + qdrant 两个服务，url 指向 `http://qdrant:6333`（容器名）或 `localhost:6333`（开发）
-- **依赖 pin（实现时锁）**：`sentence-transformers`、`qdrant-client` 锁精确版本；`query_points`/`upload_points`/`create_collection` 的方法签名以锁定版本为准，升级须重跑本 spec 测试
+- **依赖 pin（实现时锁）**：`sentence-transformers`、`qdrant-client` 锁精确版本；`query_points`/`upsert`/`create_collection` 的方法签名以锁定版本为准，升级须重跑本 spec 测试
 - **不做**：不做分块/清洗策略（数据工程，非本 spec）；不内嵌知识库内容；不做多 collection 管理（MVP 单 collection）
 
 ### `backend/bioagent/rag.py`（完整）
 
 ```python
-from typing import Any
+from typing import Any, cast
 
 from qdrant_client import AsyncQdrantClient
 from qdrant_client.models import Distance, PointStruct, VectorParams
@@ -51,11 +51,11 @@ class Embedder:
         self._model = SentenceTransformer(model_name)
 
     def embed(self, text: str) -> list[float]:
-        return self._model.encode(text).tolist()
+        return cast(list[float], self._model.encode(text).tolist())  # pyright: ignore[reportUnknownMemberType]
 
     @property
     def dim(self) -> int:
-        return self._model.get_sentence_embedding_dimension()
+        return cast(int, self._model.get_embedding_dimension())
 
 
 class RagClient:
@@ -83,7 +83,7 @@ class RagClient:
                 PointStruct(id=doc["id"], vector=vector, payload={"text": doc["text"]})
             )
         if points:
-            await self._client.upload_points(collection_name=self._collection, points=points)
+            await self._client.upsert(collection_name=self._collection, points=points)
         return len(points)
 
     async def query(self, text: str) -> list[dict[str, Any]]:
@@ -108,7 +108,7 @@ class RagClient:
   - [ ] `Embedder.embed`：注入 fake `SentenceTransformer`（`encode` 返回预设 numpy 向量）→ `embed("x")` 返回 `list[float]`；`dim` 返回 `get_sentence_embedding_dimension()` 的值
   - [ ] `RagClient.query`：fake client 的 `query_points` 记录 `collection_name`/`query`（= fake embedder 返回的向量）/`limit`（= top_k）；返回预设 points → `query()` 输出 `[{"text", "score"}]`
   - [ ] `RagClient.query` 兜底：返回的 point `payload=None` 或 `payload` 缺 `"text"` → 不崩，对应 `text` 为 `""`（`score` 仍照填）
-  - [ ] `RagClient.ingest`：fake `upload_points` 记录 points（id/vector/payload）；返回 `len(documents)`；空列表 → 返回 0 且不调 `upload_points`
+  - [ ] `RagClient.ingest`：fake `upsert` 记录 points（id/vector/payload）；返回 `len(documents)`；空列表 → 返回 0 且不调 `upsert`
   - [ ] `RagClient.ensure_collection`：`collection_exists` 返回 `False` → 调 `create_collection`（dim = embedder.dim、COSINE）；返回 `True` → 不调
   - [ ] `RagClient.close` 调 `client.close()`
 - [ ] 集成测试：无（不连真实 Qdrant / 不下载真实模型）

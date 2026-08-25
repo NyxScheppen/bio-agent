@@ -69,3 +69,14 @@
   - 回归保护：mock R 子进程（不真跑 Rscript），防后续 R 工具（11-15）直接 `subprocess` 绕过 `RRunner`
 - **所属系统**：R 执行器（`backend/bioagent/r_runner.py`）
 - **阶段**：spec 06-r-runner 实现
+
+### 07-rag：RAG 向量检索（Embedder + RagClient）
+
+- **新增测试**：
+  - `tests/test_rag/test_rag.py` — `Embedder.embed`/`dim`（注入 fake SentenceTransformer）1 条、`RagClient.query`（记录 collection/query/limit、返回 `{"text","score"}`、payload 兜底）2 条、`RagClient.ingest`（upsert 记录 points、空列表跳过）2 条、`RagClient.ensure_collection`（缺失建 collection/COSINE、已存在跳过）2 条、`RagClient.close` 1 条
+- **检查方向**：
+  - 功能正确：`Embedder.embed` 返回 `list[float]`、`dim` 返回模型维度；`query` 用 embedder 向量 + `top_k` 调 `query_points` 并投影为 `[{"text","score"}]`；`ingest` 按 document 逐条 embed + 组 `PointStruct`，经 `upsert` 上传，返回 `len(documents)`；`ensure_collection` 以 `VectorParams(size=dim, distance=COSINE)` 建 collection
+  - 边界鲁棒：`query` 遇 point `payload=None` 或缺 `"text"` 兜底为 `""`（不崩）；`ingest` 空列表返回 0 且不调 `upsert`；`ensure_collection` 幂等（`collection_exists=True` 时不再建）
+  - 回归保护：mock `AsyncQdrantClient` 与 `SentenceTransformer`（不连真实 Qdrant、不下载真实模型）；锁定 `upsert`（非 `upload_points`——1.19.0 里后者是同步方法，`await` 会运行时崩）
+- **所属系统**：RAG（`backend/bioagent/rag.py`）
+- **阶段**：spec 07-rag 实现

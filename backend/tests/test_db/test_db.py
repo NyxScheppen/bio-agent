@@ -136,6 +136,16 @@ async def test_connect_returns_database(tmp_path: Path) -> None:
         await database.conn.close()
 
 
+async def test_connect_creates_parent_dir(tmp_path: Path) -> None:
+    p = tmp_path / "nested" / "test.db"  # 父目录 nested/ 尚不存在
+    database = await db.connect(str(p))
+    try:
+        assert p.exists()          # 文件被创建
+        assert p.parent.is_dir()   # 父目录被自动创建
+    finally:
+        await database.conn.close()
+
+
 async def test_connect_closes_conn_on_migrate_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

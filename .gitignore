@@ -13,3 +13,6 @@ venv/
 
 # Secrets
 .env
+
+# Runtime data (SQLite db + uploads)
+data/

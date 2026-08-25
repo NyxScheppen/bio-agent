@@ -1,6 +1,7 @@
 import asyncio
 import sqlite3
 from dataclasses import dataclass
+from pathlib import Path
 
 import aiosqlite
 
@@ -70,6 +71,7 @@ async def connect(path: str) -> Database:
 
     path 由组合根（10-api）从 config.db.db_path 传入，本函数不解析默认值。
     """
+    Path(path).parent.mkdir(parents=True, exist_ok=True)  # 确保父目录存在（首次启动 data/ 尚不存在）
     conn = await aiosqlite.connect(path, isolation_level=None)  # autocommit：migrate 手动 BEGIN 唯一事务控制
     try:
         conn.row_factory = sqlite3.Row

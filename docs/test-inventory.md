@@ -29,9 +29,9 @@
 ### 03-db：SQLite 连接 + 建表 + 迁移
 
 - **新增测试**：
-  - `tests/test_db/test_db.py` — `migrate`（建表/索引、可空性对齐、幂等、版本门控、原子回滚）5 条 + `connect`（返回 Database、pragma/row_factory、错误路径不泄漏）2 条
+  - `tests/test_db/test_db.py` — `migrate`（建表/索引、可空性对齐、幂等、版本门控、原子回滚）5 条 + `connect`（返回 Database、pragma/row_factory、错误路径不泄漏、父目录自动创建）3 条
 - **检查方向**：
-  - 功能正确：4 张业务表 + `schema_version` 建表、2 个显式索引、版本推进到 `_MIGRATIONS` 最高版本；`connect` 返回 `Database`（conn+lock），`journal_mode=WAL`、`foreign_keys=ON`、`row_factory` 生效
+  - 功能正确：4 张业务表 + `schema_version` 建表、2 个显式索引、版本推进到 `_MIGRATIONS` 最高版本；`connect` 返回 `Database`（conn+lock），`journal_mode=WAL`、`foreign_keys=ON`、`row_factory` 生效、父目录自动 `mkdir`（首次启动 `data/` 尚不存在）
   - 边界鲁棒：可空性对齐（`token_usage.correlation_id` / `task.error` 可空，其余非 Optional 列 NOT NULL）、`migrate` 幂等、版本门控（只套未应用版本）、失败原子回滚（版本不推进）、`connect` 错误路径连接不泄漏（close 被调用）
 - **所属系统**：数据库（`backend/bioagent/db.py`）
 - **阶段**：spec 03-db 实现

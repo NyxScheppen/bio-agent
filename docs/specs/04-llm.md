@@ -96,14 +96,14 @@ def _extract_usage(response: BaseMessage) -> TokenUsageDict:
     else:
         data = {}                          # 未知形状：不静默猜，计 0 待查
     return {
-        "input": _safe_int(data.get("input_tokens") or 0),   # 键缺失/值 None/非法 计 0
-        "output": _safe_int(data.get("output_tokens") or 0),
+        "input": _safe_int(data.get("input_tokens")),   # 键缺失/值 None/非法 计 0
+        "output": _safe_int(data.get("output_tokens")),
     }
 
 
 # 内置 provider → OpenAI 兼容 base_url；不在表内者配 llm.base_url 覆盖
 _PROVIDER_BASE_URLS = {
-    "deepseek": "https://api.deepseek.com",
+    "deepseek": "https://api.deepseek.com/v1",
     "openai": "https://api.openai.com/v1",
     "ollama": "http://localhost:11434/v1",
 }

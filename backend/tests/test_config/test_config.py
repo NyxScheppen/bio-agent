@@ -96,6 +96,20 @@ def test_load_config_bad_yaml(tmp_path: Path) -> None:
         load_config(str(p))
 
 
+def test_load_config_duplicate_key_fails(tmp_path: Path) -> None:
+    p = tmp_path / "config.yaml"
+    p.write_text("llm:\n  model: a\n  model: b\n", encoding="utf-8")
+    with pytest.raises(ConfigError):
+        load_config(str(p))
+
+
+def test_load_config_duplicate_section_fails(tmp_path: Path) -> None:
+    p = tmp_path / "config.yaml"
+    p.write_text("llm:\n  model: a\nllm:\n  model: b\n", encoding="utf-8")
+    with pytest.raises(ConfigError):
+        load_config(str(p))
+
+
 def test_load_config_env_override(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     p = tmp_path / "cfg.yaml"
     p.write_text("llm:\n  model: gpt-4\n", encoding="utf-8")
@@ -112,3 +126,10 @@ def test_load_config_default_path_reads_config_yaml(
         "llm:\n  provider: ollama\n", encoding="utf-8"
     )
     assert load_config().llm.provider == "ollama"
+
+
+def test_load_repo_config_yaml_valid() -> None:
+    repo_root = Path(__file__).resolve().parents[3]
+    cfg = load_config(str(repo_root / "config.yaml"))
+    assert cfg.llm.model == "deepseek-chat"
+    assert cfg.rag.top_k == 5

@@ -81,11 +81,31 @@ def _build(dc: Any, raw: Any) -> Any:
     return dc(**kwargs)
 
 
+class _UniqueKeyLoader(yaml.SafeLoader):
+    """拒绝重复键的 SafeLoader：默认 SafeLoader 对重复键静默 last-wins。"""
+
+
+def _construct_mapping(loader: Any, node: Any, deep: bool = False) -> dict[Any, Any]:
+    mapping: dict[Any, Any] = {}
+    for key_node, value_node in node.value:
+        key = loader.construct_object(key_node, deep=deep)
+        if key in mapping:
+            raise ConfigError(f"重复配置键 {key!r}")
+        mapping[key] = loader.construct_object(value_node, deep=deep)
+    return mapping
+
+
+_UniqueKeyLoader.add_constructor(
+    yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG,
+    _construct_mapping,
+)
+
+
 def load_config(path: str | None = None) -> Config:
     # 1) 解析路径：显式 path > BIOAGENT_CONFIG 环境变量 > 默认 "config.yaml"
     resolved = path or os.environ.get("BIOAGENT_CONFIG") or "config.yaml"
     try:
-        raw: Any = yaml.safe_load(Path(resolved).read_text(encoding="utf-8"))
+        raw: Any = yaml.load(Path(resolved).read_text(encoding="utf-8"), Loader=_UniqueKeyLoader)
     except (OSError, yaml.YAMLError, UnicodeDecodeError) as exc:
         raise ConfigError(f"配置加载失败 {resolved}: {exc}") from exc
     if raw is None:

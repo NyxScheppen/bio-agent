@@ -62,10 +62,10 @@
 ### 06-r-runner：R 子进程执行器
 
 - **新增测试**：
-  - `tests/test_r_runner/test_r_runner.py` — `run` 路径拼接、args JSON 经 stdin 传入、成功解析、非零退出、stdout 非 JSON、stdout 非法 UTF-8、stdout 非对象、Rscript 缺失 8 条
+  - `tests/test_r_runner/test_r_runner.py` — `run` 路径拼接、args JSON 经 stdin 传入、序列化失败不 spawn、成功解析、非零退出、stdout 非 JSON、stdout 非法 UTF-8、stdout 非对象、Rscript 缺失 9 条
 - **检查方向**：
   - 功能正确：`script_path = os.path.join(scripts_dir, script_name)` 作为 `["Rscript", script_path]` 列表第二元素（`shell=False` 防命令注入）；args 以 `json.dumps(args).encode("utf-8")` 经 `communicate` 传入 stdin；成功路径 stdout 解析为 `dict`
-  - 边界鲁棒：非零退出码抛 `RRuntimeError`（消息含 stderr 文本）；stdout 非合法 JSON 抛 `RRuntimeError`；stdout 非法 UTF-8 经 `decode('utf-8','replace')` 兜底（不抛裸 `UnicodeDecodeError`）；stdout 非对象（如 `[1,2,3]`）抛 `RRuntimeError`；`Rscript` 缺失（`FileNotFoundError`）抛 `RRuntimeError`
+  - 边界鲁棒：非零退出码抛 `RRuntimeError`（消息含 stderr 文本）；stdout 非合法 JSON 抛 `RRuntimeError`；stdout 非法 UTF-8 经 `decode('utf-8','replace')` 兜底（不抛裸 `UnicodeDecodeError`）；stdout 非对象（如 `[1,2,3]`）抛 `RRuntimeError`；`Rscript` 缺失（`FileNotFoundError`）抛 `RRuntimeError`；args 不可 JSON 化时先抛 `TypeError`、不 spawn 子进程（payload 前置在 spawn 之前）
   - 回归保护：mock R 子进程（不真跑 Rscript），防后续 R 工具（11-15）直接 `subprocess` 绕过 `RRunner`
 - **所属系统**：R 执行器（`backend/bioagent/r_runner.py`）
 - **阶段**：spec 06-r-runner 实现

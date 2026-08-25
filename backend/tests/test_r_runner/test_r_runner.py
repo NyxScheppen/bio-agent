@@ -56,6 +56,17 @@ async def test_args_json_stdin(monkeypatch: pytest.MonkeyPatch) -> None:
     assert process.input == json.dumps({"genes": ["a", "b"]}).encode("utf-8")
 
 
+async def test_serialize_failure_does_not_spawn(monkeypatch: pytest.MonkeyPatch) -> None:
+    # payload 在 spawn 之前序列化：args 不可 JSON 化时不得起子进程
+    async def fake_exec(*args: Any, **kwargs: Any) -> _FakeProcess:
+        raise AssertionError("create_subprocess_exec must not be called")
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+    runner = RRunner("/srv/scripts")
+    with pytest.raises(TypeError):
+        await runner.run("dge.R", {"x": object()})
+
+
 async def test_success(monkeypatch: pytest.MonkeyPatch) -> None:
     process = _FakeProcess(returncode=0, stdout=b'{"a": 1}')
     _install_fake(monkeypatch, process)

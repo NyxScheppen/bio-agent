@@ -19,6 +19,7 @@ class RRunner:
 
     async def run(self, script_name: str, args: dict[str, Any]) -> dict[str, Any]:
         script_path = os.path.join(self._scripts_dir, script_name)
+        payload = json.dumps(args).encode("utf-8")
         try:
             proc = await asyncio.create_subprocess_exec(
                 "Rscript",
@@ -29,18 +30,18 @@ class RRunner:
             )
         except FileNotFoundError as exc:
             raise RRuntimeError("Rscript 未安装或不在 PATH 中") from exc
-        payload = json.dumps(args).encode("utf-8")
         stdout, stderr = await proc.communicate(payload)
         if proc.returncode != 0:
             raise RRuntimeError(
                 f"{script_name} 失败（exit {proc.returncode}）："
                 f"{stderr.decode('utf-8', 'replace').strip()}"
             )
+        text = stdout.decode("utf-8", "replace")
         try:
-            data = json.loads(stdout.decode("utf-8", "replace"))
+            data = json.loads(text)
         except json.JSONDecodeError as exc:
             raise RRuntimeError(
-                f"{script_name} 输出非合法 JSON：{stdout.decode('utf-8', 'replace')[:200]}"
+                f"{script_name} 输出非合法 JSON：{text[:200]}"
             ) from exc
         if not isinstance(data, dict):
             raise RRuntimeError(

@@ -1,5 +1,6 @@
 {
   "pythonVersion": "3.11",
   "typeCheckingMode": "strict",
-  "include": ["backend/bioagent", "backend/tests"]
+  "include": ["backend/bioagent", "backend/tests"],
+  "extraPaths": ["backend"]
 }

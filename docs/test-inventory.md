@@ -14,3 +14,13 @@
   - 回归保护：防枚举漏成员/多成员/改值；防 `frontend` 两次实例化共享
 - **所属系统**：类型与枚举（`backend/bioagent/enums.py` / `types.py`）
 - **阶段**：spec 01-types 实现
+
+### 02-config：配置加载
+
+- **新增测试**：
+  - `tests/test_config/test_config.py` — `validate_config` 纯函数测试（7 条）、`load_config` 测试（8 条，tmp yaml + monkeypatch）
+- **检查方向**：
+  - 功能正确：缺键填默认、`BIOAGENT_CONFIG` 覆盖路径、`path=None` 读 `config.yaml`；合法配置通过、`base_url=None` 放行
+  - 边界鲁棒：未知顶层/段内键报错、嵌套段非 dict 报错、文件缺失/坏 YAML 报错、越界值（`judge_sample_rate=1.5` / `top_k=0`）报错、错类型（`"20"` / `True`）报错、`base_url=""` 报错
+- **所属系统**：配置（`backend/bioagent/config.py` / `config.yaml`）
+- **阶段**：spec 02-config 实现

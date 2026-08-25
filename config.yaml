@@ -1,0 +1,23 @@
+llm:
+  provider: deepseek          # deepseek | openai | ollama（04-llm 内置映射键）；校验只查非空，未知 provider 由 04-llm 构造时报错——其它 OpenAI 兼容服务配 base_url 即可
+  model: deepseek-chat
+  api_key_env: DEEPSEEK_API_KEY
+  # base_url: http://localhost:11434/v1   # 可选：覆盖/自定义 endpoint
+
+embedding:
+  model: all-MiniLM-L6-v2     # 本地 sentence-transformers（07-rag 向量化）
+
+db:
+  db_path: data/bioagent.db    # SQLite 文件路径（03-db）
+
+storage:
+  upload_dir: data/uploads     # 上传文件落盘目录（10-api，uuid 重命名）
+  r_scripts_dir: backend/bioagent/r_scripts  # 服务端 R 脚本目录（06-r-runner）
+
+rag:
+  qdrant_url: http://localhost:6333
+  collection: bioagent_kb      # Qdrant collection 名
+  top_k: 5                     # 检索返回条数
+
+eval:
+  judge_sample_rate: 0.1       # LLM-judge 抽样比例

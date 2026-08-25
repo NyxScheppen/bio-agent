@@ -3,6 +3,7 @@ name = "bio-agent-backend"
 version = "0.1.0"
 description = "Synthetic biology multi-agent assistant backend"
 requires-python = ">=3.11"
+dependencies = ["pyyaml>=6.0"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "ruff>=0.6", "pyright>=1.1"]

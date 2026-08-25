@@ -39,9 +39,10 @@ class RagClient:
         """写入文本块，返回条数。document = {"id": str, "text": str}。"""
         points: list[PointStruct] = []
         for doc in documents:
-            vector = self._embedder.embed(doc["text"])
+            text = doc["text"]
+            vector = self._embedder.embed(text)
             points.append(
-                PointStruct(id=doc["id"], vector=vector, payload={"text": doc["text"]})
+                PointStruct(id=doc["id"], vector=vector, payload={"text": text})
             )
         if points:
             await self._client.upsert(collection_name=self._collection, points=points)

@@ -78,9 +78,10 @@ class RagClient:
         """写入文本块，返回条数。document = {"id": str, "text": str}。"""
         points: list[PointStruct] = []
         for doc in documents:
-            vector = self._embedder.embed(doc["text"])
+            text = doc["text"]
+            vector = self._embedder.embed(text)
             points.append(
-                PointStruct(id=doc["id"], vector=vector, payload={"text": doc["text"]})
+                PointStruct(id=doc["id"], vector=vector, payload={"text": text})
             )
         if points:
             await self._client.upsert(collection_name=self._collection, points=points)
@@ -105,7 +106,7 @@ class RagClient:
 ## 测试要点
 
 - [ ] 单元测试 `tests/test_rag/`（`pytest-asyncio`，注入 fake `Embedder` 与 fake `AsyncQdrantClient`）：
-  - [ ] `Embedder.embed`：注入 fake `SentenceTransformer`（`encode` 返回预设 numpy 向量）→ `embed("x")` 返回 `list[float]`；`dim` 返回 `get_sentence_embedding_dimension()` 的值
+  - [ ] `Embedder.embed`：注入 fake `SentenceTransformer`（`encode` 返回预设 numpy 向量）→ `embed("x")` 返回 `list[float]`；`dim` 返回 `get_embedding_dimension()` 的值
   - [ ] `RagClient.query`：fake client 的 `query_points` 记录 `collection_name`/`query`（= fake embedder 返回的向量）/`limit`（= top_k）；返回预设 points → `query()` 输出 `[{"text", "score"}]`
   - [ ] `RagClient.query` 兜底：返回的 point `payload=None` 或 `payload` 缺 `"text"` → 不崩，对应 `text` 为 `""`（`score` 仍照填）
   - [ ] `RagClient.ingest`：fake `upsert` 记录 points（id/vector/payload）；返回 `len(documents)`；空列表 → 返回 0 且不调 `upsert`

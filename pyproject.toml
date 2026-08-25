@@ -3,7 +3,13 @@ name = "bio-agent-backend"
 version = "0.1.0"
 description = "Synthetic biology multi-agent assistant backend"
 requires-python = ">=3.11"
-dependencies = ["pyyaml>=6.0", "aiosqlite>=0.19"]
+dependencies = [
+    "pyyaml>=6.0",
+    "aiosqlite>=0.19",
+    "langchain-core==1.5.5",
+    "langchain-openai==1.5.1",
+    "pydantic>=2.0",
+]
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "ruff>=0.6", "pyright>=1.1", "pytest-asyncio>=0.24"]

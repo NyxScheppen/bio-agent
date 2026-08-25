@@ -35,3 +35,14 @@
   - 边界鲁棒：可空性对齐（`token_usage.correlation_id` / `task.error` 可空，其余非 Optional 列 NOT NULL）、`migrate` 幂等、版本门控（只套未应用版本）、失败原子回滚（版本不推进）、`connect` 错误路径连接不泄漏（close 被调用）
 - **所属系统**：数据库（`backend/bioagent/db.py`）
 - **阶段**：spec 03-db 实现
+
+### 04-llm：统一 LLM 客户端
+
+- **新增测试**：
+  - `tests/test_llm/test_llm.py` — `_to_lc`（system/user/assistant/未知角色）4 条、`_extract_usage`（dict / Pydantic / None / 值 None / 非数字 / 未知形状）6 条、`_resolve_base_url`（显式 / 已知 provider / 未知 provider）3 条、`complete`（字段填充、token 抽取、缺失计 0、json_mode 转发、非 json_mode 省略、消息顺序、非文本抛错、记账写入、记账失败 best-effort）9 条、`from_config`（未知 provider / 缺 key / ollama 免 key / normal / openai / 自定义 base_url）6 条
+- **检查方向**：
+  - 功能正确：`_to_lc` 角色映射、`_extract_usage` 兼容 dict 与 Pydantic 两种 `usage_metadata` 形状、`_resolve_base_url` 显式优先于内置映射；`complete` 组装 `LLMOutput`（id/module/type/model/content/token_usage/correlation_id）、`json_mode` 注入 `response_format`、消息按序转为 LangChain 消息、按 `LLMOutput` 写 `token_usage` 一行并 commit
+  - 边界鲁棒：未知角色抛 `ValueError`、非文本 content 抛 `RuntimeError`、token 用量缺失/None/非法值计 0、未知 provider 抛 `ConfigError`、缺 API key 抛 `ConfigError`（ollama 免 key 用 dummy）；记账失败不阻断主流程（best-effort，仍返回 `LLMOutput`）
+  - 回归保护：`from_config` 走 ChatOpenAI 统一封装（非裸 httpx）、显式传 `model_name` 不依赖 LangChain 属性
+- **所属系统**：LLM 客户端（`backend/bioagent/llm/client.py`）
+- **阶段**：spec 04-llm 实现

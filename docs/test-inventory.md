@@ -146,3 +146,14 @@
   - 回归保护：字符串断言 R 脚本文本（不真跑 Rscript、不依赖真实 clusterProfiler/org.Hs.eg.db 环境）；`register()` 契约断言防 R 工具声明错误
 - **所属系统**：富集分析工具（`backend/bioagent/tools/enrichment/go_kegg.py` / `backend/bioagent/r_scripts/go_kegg.R`）
 - **阶段**：spec 13-enrichment 实现
+
+### 14-network：蛋白互作网络工具（Python networkx + STRING PPI）
+
+- **新增测试**：
+  - `tests/test_tools_network/test_ppi.py` — `run` 成功 1 条、JSON 可序列化 1 条、空基因列表 1 条、STRING 非 200 1 条、`TOOL` 形状 1 条，共 5 条
+- **检查方向**：
+  - 功能正确：`run` 调 `httpx.AsyncClient.get` 取 STRING `network` 端点 TSV，按 header 名（`preferredName_A`/`preferredName_B`/`score`，不依赖列顺序）解析、建 `nx.Graph`、只保留 gene_list 内部互作；`nodes` 含所有 gene_list 节点（`id`+`degree`）、`edges` 含 `source`/`target`/`score`；`TOOL` 导出 Python 工具契约（`run` 非空、`r_script is None`）
+  - 边界鲁棒：空 `gene_list` → `{"nodes": [], "edges": []}` 不抛；STRING 非 200 → `raise_for_status()` 抛 `httpx.HTTPStatusError`（不吞）；`degree` 是 `int`、`score` 是 `float`（`json.dumps` 不抛，无 numpy 类型）
+  - 回归保护：`monkeypatch` `httpx.AsyncClient` 返回 fixture TSV（不真连 STRING）；fixture header 打乱列序（`score` 在前）验证按 header 名取列；1 行 target 不在 gene_list 内验证边过滤
+- **所属系统**：网络药理工具（`backend/bioagent/tools/network/ppi.py`）
+- **阶段**：spec 14-network 实现

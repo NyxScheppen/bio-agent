@@ -30,10 +30,12 @@
 - **human-only（MVP）**：`species` 写死 `9606`，不加 species 参数。多物种 = 改 `species` 整数，是「未请求的灵活性」，不做——与 13 的 organism 写死对齐。
 - **httpx 直连（非 LLM）**：CLAUDE.md「不直接使用 httpx」只约束 LLM 调用（走 04-llm）；STRING 是外部数据 API，`httpx.AsyncClient` 合法。`run` 里 `async with httpx.AsyncClient()` 每次新建客户端（工具无注入、不持长连接），MVP 一次请求够用。
 - **测试不触网**：`run` 直调 `httpx.AsyncClient.get`，测试用 `monkeypatch`/`respx` 换掉 `httpx.AsyncClient` 返回 fixture TSV，不真连 STRING。
+- **pyright 抑制**：networkx 3.6 有内联注解但未声明 `py.typed`，pyright strict 把 `nx.Graph`/`g.nodes`/`g.degree`/`g.edges` 判为 partially unknown（`reportUnknownVariableType`/`reportUnknownMemberType`/`reportUnknownArgumentType` 级联，12 处）。故文件首行加模块级 `# pyright:` 抑制（与 11-single-gene 对 pandas/scipy、09-orchestration 对 langgraph 的做法一致），不改类型逻辑。httpx 0.28 带 `py.typed`，无此问题。
 
 ### `backend/bioagent/tools/network/ppi.py`（完整）
 
 ```python
+# pyright: reportUnknownVariableType=false, reportUnknownMemberType=false, reportUnknownArgumentType=false
 from typing import Any
 
 import httpx

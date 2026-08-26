@@ -150,10 +150,10 @@
 ### 14-network：蛋白互作网络工具（Python networkx + STRING PPI）
 
 - **新增测试**：
-  - `tests/test_tools_network/test_ppi.py` — `run` 成功 1 条、JSON 可序列化 1 条、空基因列表 1 条、STRING 非 200 1 条、`TOOL` 形状 1 条，共 5 条
+  - `tests/test_tools_network/test_ppi.py` — `run` 成功 1 条、JSON 可序列化 1 条、空基因列表 1 条、空 body 1 条、STRING 非 200 1 条、`TOOL` 形状 1 条，共 6 条
 - **检查方向**：
-  - 功能正确：`run` 调 `httpx.AsyncClient.get` 取 STRING `network` 端点 TSV，按 header 名（`preferredName_A`/`preferredName_B`/`score`，不依赖列顺序）解析、建 `nx.Graph`、只保留 gene_list 内部互作；`nodes` 含所有 gene_list 节点（`id`+`degree`）、`edges` 含 `source`/`target`/`score`；`TOOL` 导出 Python 工具契约（`run` 非空、`r_script is None`）
-  - 边界鲁棒：空 `gene_list` → `{"nodes": [], "edges": []}` 不抛；STRING 非 200 → `raise_for_status()` 抛 `httpx.HTTPStatusError`（不吞）；`degree` 是 `int`、`score` 是 `float`（`json.dumps` 不抛，无 numpy 类型）
+  - 功能正确：`run` 调 `httpx.AsyncClient.get` 取 STRING `network` 端点 TSV，按 header 名（`preferredName_A`/`preferredName_B`/`score`，不依赖列顺序）解析、建 `nx.Graph`、只保留 gene_list 内部互作（`set` 成员判定 O(1)）；`nodes` 含所有 gene_list 节点（`id`+`degree`）、`edges` 含 `source`/`target`/`score`；`TOOL` 导出 Python 工具契约（`run` 非空、`r_script is None`）
+  - 边界鲁棒：空 `gene_list` → `{"nodes": [], "edges": []}` 不抛；STRING 返回空 body → `lines` 空即返回节点全 degree 0 + 空边（`lines[0]` 不越界）；STRING 非 200 → `raise_for_status()` 抛 `httpx.HTTPStatusError`（不吞）；`degree` 是 `int`、`score` 是 `float`（`json.dumps` 不抛，无 numpy 类型）
   - 回归保护：`monkeypatch` `httpx.AsyncClient` 返回 fixture TSV（不真连 STRING）；fixture header 打乱列序（`score` 在前）验证按 header 名取列；1 行 target 不在 gene_list 内验证边过滤
 - **所属系统**：网络药理工具（`backend/bioagent/tools/network/ppi.py`）
 - **阶段**：spec 14-network 实现
@@ -161,10 +161,10 @@
 ### 15-survival：生存分析工具（R survival）
 
 - **新增测试**：
-  - `tests/test_tools_survival/test_survival.py` — `TOOL` 形状 1 条、`register()` 契约 1 条、R 脚本 core 流程 1 条、列名默认值回退 1 条、strata 切片 1 条、校验 1 条、序列化 1 条，共 7 条
+  - `tests/test_tools_survival/test_survival.py` — `TOOL` 形状 1 条、`register()` 契约 1 条、R 脚本 core 流程 1 条、列名默认值回退 1 条、strata 切片 1 条、校验 1 条、序列化 1 条、cox 守卫 1 条，共 8 条
 - **检查方向**：
   - 功能正确：`TOOL` 导出 R 工具契约（`r_script="km_cox.R"`、`run=None`）；`register()` 通过校验；R 脚本文本含 `Surv` → `survfit`（KM）→ `survdiff`（log-rank）→ `coxph`（Cox）→ `cat(jsonlite::toJSON(...))` 完整生存分析流程
-  - 边界鲁棒：`time_col`/`event_col`/`group_col` 默认值回退（`is.null(args$x_col) ... else args$x_col`）；临床表缺列 `%in% colnames(clin)` 即 `stop`、`length(levels(group)) != 2` 非二组即 `stop`（退化输入非零退出 → 06-r-runner 转 `RRuntimeError`）
+  - 边界鲁棒：`time_col`/`event_col`/`group_col` 默认值回退（`is.null(args$x_col) ... else args$x_col`）；临床表缺列 `%in% colnames(clin)` 即 `stop`、`length(levels(group)) != 2` 非二组即 `stop`（退化输入非零退出 → 06-r-runner 转 `RRuntimeError`）；`summary(cox)$coefficients` 按 `nrow(cox_sum)` 守卫 + `"Pr(>|z|)"` 列名取 p（某组全删失不越界）
   - 回归保护：字符串断言 R 脚本文本（不真跑 Rscript、不依赖真实 survival 环境）；`seq_along(fit$strata)` + `fit$strata[i]` 切片还原每组 KM 曲线（spec 标注最易写错的点）；`jsonlite::unbox`（标量显式 unbox）+ `levels(group)[i]`（group 名去前缀）
 - **所属系统**：生存分析工具（`backend/bioagent/tools/survival/km_cox.py` / `backend/bioagent/r_scripts/km_cox.R`）
 - **阶段**：spec 15-survival 实现
@@ -172,15 +172,16 @@
 ### 16-frontend：前端（React + Vite + TS + ECharts + Tailwind）
 
 - **新增测试**：
-  - `src/charts/options.test.ts` — 五种 `*Option` 纯函数各 1 条（boxplot/volcano/barplot/network/km_curve 返回确定性 option、`series.type` 正确、空 genes 空 series 不抛），共 5 条
+  - `src/charts/options.test.ts` — 五种 `*Option` 纯函数各 1 条（boxplot/volcano/barplot/network/km_curve 返回确定性 option、`series.type` 正确、空 genes 空 series 不抛）+ boxplot 中位数取 `summary.median` 1 条 + volcano p=0 不产生 Infinity 1 条，共 7 条
   - `src/hooks/useSSE.test.ts` — 逐帧 onEvent + done 结束 1 条、非 200 置 error 并 reject 1 条、stop() 中止 reader 1 条，共 3 条
   - `src/stores/chatStore.test.ts` — send 入消息/快照随帧更新/report 后 done 1 条、error 帧 → status error 1 条，共 2 条
   - `src/components/ResultChart.test.tsx` — limma_dge→volcano→scatter 分发 1 条、未知 result_type→JSON 不崩 1 条，共 2 条
   - `src/components/FileUpload.test.tsx` — 选文件→upload→fileId 1 条
+  - `src/components/StepList.test.tsx` — 失败任务时已完成步骤仍 ✓、未执行步骤 ✗ 1 条
   - `src/stores/taskStore.test.ts` — `open` 取回任务并把 plan/steps/report 回填主视图（`chatStore.currentState`/`status="done"`）1 条、失败任务回填 `status="error"` 1 条，共 2 条
 - **检查方向**：
   - 功能正确：五种 `*Option` 是纯函数（同输入同输出、含期望 `series.type`、`xAxis`/`yAxis` 等关键字段无 `undefined`）；`useSSE` 的 `run` POST 后按 `\n\n` 切帧、剥 `data: ` 前缀 JSON.parse，done 帧 resolve / error 帧 reject / 否则 `onEvent(快照)`；`chatStore.send` 入用户消息 + 逐帧写 `currentState`、report 出现后 `status="done"`；`taskStore.open` 取 `TaskDetail` 后把 plan/steps/report 回填 `chatStore.currentState`（复用主视图渲染），失败任务回填 `status="error"`；`ResultChart` 按 `tool→result_type` 分发到对应 `*Option`，未知类型回退 JSON；`FileUpload` 选文件后调 `client.upload` 写 `fileId`
-  - 边界鲁棒：`volcanoOption` 空 genes 返空 series 不抛；`useSSE` 非 200 置 `error` 并 reject、error 帧 `reader.cancel()` 后 reject；`stop()` 调 `reader.cancel()` 中止读取；`ResultChart` 未知 result_type 渲染 `<pre>` JSON 而非崩
+  - 边界鲁棒：`volcanoOption` 空 genes 返空 series 不抛、p=0 时 `-log10` clamp 不产生 Infinity；`boxplotOption` 中位数取 `summary.median`（非 floor 下标）、q1/q3 线性插值；`useSSE` 非 200 置 `error` 并 reject、error 帧 `reader.cancel()` 后 reject；`stop()` 调 `reader.cancel()` 中止读取；`ResultChart` 未知 result_type 渲染 `<pre>` JSON 而非崩；`StepList` 失败任务时已完成步骤仍 ✓
   - 回归保护：mock 全局 `fetch`（`vi.stubGlobal`）返回 fake 流（`vi.fn` 逐步 yield 帧），不真连后端；`ResultChart` mock `ECharts` 组件（echarts `init` 在 jsdom 无 canvas 会失败），断言 series.type 而非真实渲染；`FileUpload` mock `client.upload`；`taskStore` mock `client.getTask` 返回预设 `TaskDetail`，断言跨 store 回填而非真实 HTTP；测试不依赖真实 ECharts/DOM 布局
 - **所属系统**：前端（`frontend/src/{charts,hooks,stores,components}`）
 - **阶段**：spec 16-frontend 实现

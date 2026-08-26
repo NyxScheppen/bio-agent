@@ -3,17 +3,25 @@ import type { BarplotResult, BoxplotResult, KmCurveResult, NetworkResult, Volcan
 
 // 五种图表的 option 纯函数：同输入必同输出，无副作用，单测不碰 DOM
 
+// 线性插值分位数（pandas/numpy 'linear' 默认），避免 floor 下标与后端 median 不一致
+function quantile(sorted: number[], q: number): number {
+  const pos = (sorted.length - 1) * q
+  const lo = Math.floor(pos)
+  const hi = Math.ceil(pos)
+  if (lo === hi) return sorted[lo]
+  return sorted[lo] + (sorted[hi] - sorted[lo]) * (pos - lo)
+}
+
 export function boxplotOption(data: BoxplotResult): EChartsOption {
   const categories = Object.keys(data.samples)
   const seriesData: number[][] = categories.map((cat) => {
     const sorted = [...data.samples[cat]].sort((a, b) => a - b)
-    const n = sorted.length
     return [
       sorted[0],
-      sorted[Math.floor(n * 0.25)],
-      sorted[Math.floor(n * 0.5)],
-      sorted[Math.floor(n * 0.75)],
-      sorted[n - 1],
+      quantile(sorted, 0.25),
+      data.summary[cat].median,
+      quantile(sorted, 0.75),
+      sorted[sorted.length - 1],
     ]
   })
   return {
@@ -27,7 +35,7 @@ export function boxplotOption(data: BoxplotResult): EChartsOption {
 
 export function volcanoOption(data: VolcanoResult): EChartsOption {
   const seriesData = data.genes.map((g) => ({
-    value: [g.logFC, -Math.log10(g.p_value)] as [number, number],
+    value: [g.logFC, -Math.log10(Math.max(g.p_value, 1e-300))] as [number, number],
     itemStyle: { color: g.adj_p_value < 0.05 ? '#e74c3c' : '#95a5a6' },
   }))
   return {

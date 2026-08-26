@@ -12,7 +12,7 @@ export default function StepList({ plan, steps, failed }: Props) {
     <ol className="space-y-2 p-4">
       {plan.map((s, i) => {
         const done = doneTools.has(s.tool)
-        const status: 'done' | 'pending' | 'failed' = failed ? 'failed' : done ? 'done' : 'pending'
+        const status: 'done' | 'pending' | 'failed' = done ? 'done' : failed ? 'failed' : 'pending'
         const cls =
           status === 'done' ? 'text-green-600' : status === 'failed' ? 'text-red-600' : 'text-gray-400'
         const icon = status === 'done' ? '✓' : status === 'failed' ? '✗' : '○'

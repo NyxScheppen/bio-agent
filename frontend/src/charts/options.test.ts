@@ -65,4 +65,25 @@ describe('options.ts 纯函数', () => {
     expect(series.type).toBe('line')
     expect(series.step).toBe('end')
   })
+
+  it('boxplotOption 用 summary.median 作为中位数', () => {
+    const data: BoxplotResult = {
+      gene: 'TP53',
+      samples: { A: [1, 2, 3, 4] },
+      summary: { A: { n: 4, mean: 2.5, median: 2.5, sd: null } },
+      p_value: 0.01,
+    }
+    const series = seriesOf(boxplotOption(data))[0]
+    const row = (series.data as number[][])[0]
+    expect(row[2]).toBe(2.5) // 中位数取 summary.median，非 floor 下标
+  })
+
+  it('volcanoOption p_value=0 不产生 Infinity', () => {
+    const data: VolcanoResult = {
+      genes: [{ gene: 'g', logFC: 1, p_value: 0, adj_p_value: 0.01 }],
+    }
+    const series = seriesOf(volcanoOption(data))[0]
+    const point = (series.data as { value: [number, number] }[])[0]
+    expect(Number.isFinite(point.value[1])).toBe(true)
+  })
 })

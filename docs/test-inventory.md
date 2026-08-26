@@ -157,3 +157,14 @@
   - 回归保护：`monkeypatch` `httpx.AsyncClient` 返回 fixture TSV（不真连 STRING）；fixture header 打乱列序（`score` 在前）验证按 header 名取列；1 行 target 不在 gene_list 内验证边过滤
 - **所属系统**：网络药理工具（`backend/bioagent/tools/network/ppi.py`）
 - **阶段**：spec 14-network 实现
+
+### 15-survival：生存分析工具（R survival）
+
+- **新增测试**：
+  - `tests/test_tools_survival/test_survival.py` — `TOOL` 形状 1 条、`register()` 契约 1 条、R 脚本 core 流程 1 条、列名默认值回退 1 条、strata 切片 1 条、校验 1 条、序列化 1 条，共 7 条
+- **检查方向**：
+  - 功能正确：`TOOL` 导出 R 工具契约（`r_script="km_cox.R"`、`run=None`）；`register()` 通过校验；R 脚本文本含 `Surv` → `survfit`（KM）→ `survdiff`（log-rank）→ `coxph`（Cox）→ `cat(jsonlite::toJSON(...))` 完整生存分析流程
+  - 边界鲁棒：`time_col`/`event_col`/`group_col` 默认值回退（`is.null(args$x_col) ... else args$x_col`）；临床表缺列 `%in% colnames(clin)` 即 `stop`、`length(levels(group)) != 2` 非二组即 `stop`（退化输入非零退出 → 06-r-runner 转 `RRuntimeError`）
+  - 回归保护：字符串断言 R 脚本文本（不真跑 Rscript、不依赖真实 survival 环境）；`seq_along(fit$strata)` + `fit$strata[i]` 切片还原每组 KM 曲线（spec 标注最易写错的点）；`jsonlite::unbox`（标量显式 unbox）+ `levels(group)[i]`（group 名去前缀）
+- **所属系统**：生存分析工具（`backend/bioagent/tools/survival/km_cox.py` / `backend/bioagent/r_scripts/km_cox.R`）
+- **阶段**：spec 15-survival 实现

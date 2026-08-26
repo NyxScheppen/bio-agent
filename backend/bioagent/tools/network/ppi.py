@@ -19,16 +19,19 @@ async def run(gene_list: list[str]) -> dict[str, Any]:
         )
         resp.raise_for_status()
     lines = resp.text.strip().splitlines()
+    if not lines:
+        return {"nodes": [{"id": n, "degree": 0} for n in gene_list], "edges": []}
     header = lines[0].split("\t")
     col = {name: i for i, name in enumerate(header)}
     g = nx.Graph()
     g.add_nodes_from(gene_list)
+    gene_set = set(gene_list)
     for line in lines[1:]:
         cols = line.split("\t")
         source = cols[col["preferredName_A"]]
         target = cols[col["preferredName_B"]]
         score = float(cols[col["score"]])
-        if source in gene_list and target in gene_list:
+        if source in gene_set and target in gene_set:
             g.add_edge(source, target, score=score)
     nodes = [{"id": n, "degree": g.degree(n)} for n in g.nodes]
     edges = [

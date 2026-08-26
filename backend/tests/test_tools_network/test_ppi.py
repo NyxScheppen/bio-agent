@@ -78,6 +78,14 @@ async def test_run_empty_gene_list() -> None:
     assert result == {"nodes": [], "edges": []}
 
 
+async def test_run_empty_body(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(httpx, "AsyncClient", lambda: _FakeClient(""))
+    result = await run(["TP53", "MDM2"])
+    assert result["edges"] == []
+    assert {n["id"] for n in result["nodes"]} == {"TP53", "MDM2"}
+    assert all(n["degree"] == 0 for n in result["nodes"])
+
+
 async def test_run_non_200(fake_httpx_error: _FakeClient) -> None:
     with pytest.raises(httpx.HTTPStatusError):
         await run(["TP53", "MDM2"])

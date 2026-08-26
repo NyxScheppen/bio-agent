@@ -30,6 +30,7 @@
 - **human-only（MVP）**：`species` 写死 `9606`，不加 species 参数。多物种 = 改 `species` 整数，是「未请求的灵活性」，不做——与 13 的 organism 写死对齐。
 - **httpx 直连（非 LLM）**：CLAUDE.md「不直接使用 httpx」只约束 LLM 调用（走 04-llm）；STRING 是外部数据 API，`httpx.AsyncClient` 合法。`run` 里 `async with httpx.AsyncClient()` 每次新建客户端（工具无注入、不持长连接），MVP 一次请求够用。
 - **测试不触网**：`run` 直调 `httpx.AsyncClient.get`，测试用 `monkeypatch`/`respx` 换掉 `httpx.AsyncClient` 返回 fixture TSV，不真连 STRING。
+- **健壮性**：`gene_list` 成员判定用 `set`（O(1)，避免每行 O(n) 扫描）；STRING 对无互作的查询可能返回空 body，`lines` 为空时直接返回全部节点 degree=0 + 空边，避免 `lines[0]` 越界。
 - **pyright 抑制**：networkx 3.6 有内联注解但未声明 `py.typed`，pyright strict 把 `nx.Graph`/`g.nodes`/`g.degree`/`g.edges` 判为 partially unknown（`reportUnknownVariableType`/`reportUnknownMemberType`/`reportUnknownArgumentType` 级联，12 处）。故文件首行加模块级 `# pyright:` 抑制（与 11-single-gene 对 pandas/scipy、09-orchestration 对 langgraph 的做法一致），不改类型逻辑。httpx 0.28 带 `py.typed`，无此问题。
 
 ### `backend/bioagent/tools/network/ppi.py`（完整）
@@ -56,16 +57,19 @@ async def run(gene_list: list[str]) -> dict[str, Any]:
         )
         resp.raise_for_status()
     lines = resp.text.strip().splitlines()
+    if not lines:
+        return {"nodes": [{"id": n, "degree": 0} for n in gene_list], "edges": []}
     header = lines[0].split("\t")
     col = {name: i for i, name in enumerate(header)}
     g = nx.Graph()
     g.add_nodes_from(gene_list)
+    gene_set = set(gene_list)
     for line in lines[1:]:
         cols = line.split("\t")
         source = cols[col["preferredName_A"]]
         target = cols[col["preferredName_B"]]
         score = float(cols[col["score"]])
-        if source in gene_list and target in gene_list:
+        if source in gene_set and target in gene_set:
             g.add_edge(source, target, score=score)
     nodes = [{"id": n, "degree": g.degree(n)} for n in g.nodes]
     edges = [
@@ -108,6 +112,7 @@ TOOL = ToolDefinition(
   - [ ] `run` 成功：fixture 含 header + 3 行互作（其中 1 行的 target 不在 gene_list 内）→ `nodes` 含所有 gene_list 节点、`edges` 只含 gene_list 内互作；`score` 是 float、`degree` 是 int
   - [ ] `nodes`/`edges` 可 `json.dumps`（无 numpy 类型）
   - [ ] 空 gene_list → `nodes`/`edges` 为空，不抛
+  - [ ] 空 body（STRING 返回空）→ `nodes` 全 degree 0、`edges` 空，不抛
   - [ ] STRING 非 200 → `raise_for_status()` 抛（`httpx.HTTPStatusError`）
   - [ ] `TOOL` 形状：`category is Category.NETWORK`、`runtime is Runtime.PYTHON`、`run is not None`、`r_script is None`
 - [ ] 集成测试：无

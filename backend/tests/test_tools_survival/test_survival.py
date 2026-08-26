@@ -60,3 +60,9 @@ def test_r_script_serialization() -> None:
     script = _r_script()
     assert "jsonlite::unbox" in script
     assert "levels(group)[i]" in script
+
+
+def test_r_script_cox_guard() -> None:
+    script = _r_script()
+    assert "nrow(cox_sum)" in script
+    assert '"Pr(>|z|)"' in script

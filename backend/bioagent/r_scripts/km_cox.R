@@ -40,7 +40,9 @@ logrank_p <- 1 - stats::pchisq(lr$chisq, df = length(levels(group)) - 1)
 
 cox <- survival::coxph(surv_obj ~ group)
 cox_hr <- as.numeric(exp(stats::coef(cox)))
-cox_p <- as.numeric(summary(cox)$coefficients[1, 5])
+# Cox HR 参照组 = factor 第一水平（字母序更小者）：HR = 第二组 vs 第一组，>1 表示第二组风险更高
+cox_sum <- summary(cox)$coefficients
+cox_p <- as.numeric(if (nrow(cox_sum) >= 1) cox_sum[1, "Pr(>|z|)"] else NA)
 
 result <- list(
   km_curves = km_curves,

@@ -69,6 +69,7 @@ class AgentState(TypedDict, total=False):
 ### `backend/bioagent/orchestration/nodes.py`（完整）
 
 ```python
+# pyright: reportTypedDictNotRequiredAccess=false
 import json
 import os
 import random
@@ -248,6 +249,7 @@ def make_reporter_node(
 ### `backend/bioagent/orchestration/graph.py`（完整）
 
 ```python
+# pyright: reportMissingTypeStubs=false, reportUnknownMemberType=false, reportArgumentType=false
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
@@ -273,7 +275,7 @@ def build_graph(
     sample_rate: float,
     upload_dir: str,
     rag: RagClient,
-) -> CompiledStateGraph:
+) -> CompiledStateGraph[AgentState, None, AgentState, AgentState]:
     """组装 router → planner → executor → reporter 线性图。
 
     sample_rate 由组合根（10-api）从 config.eval.judge_sample_rate 传入；
@@ -294,6 +296,8 @@ def build_graph(
 ```
 
 **依赖 pin（实现时锁）**：`langgraph` / `langchain-core` 锁精确版本（非 `>=` 宽范围）。`StateGraph` / `CompiledStateGraph` 的导入路径（`langgraph.graph` / `langgraph.graph.state`）与 `compile()` 返回类型的泛型形参以锁定版本为准；若 pyright strict 对 `CompiledStateGraph` 报「缺类型实参」，按锁定版本补 `CompiledStateGraph[AgentState, ...]` 即可，升级依赖须重跑本 spec 测试。
+
+**pyright strict 抑制（代码顶部 `# pyright:` 注释）**：`nodes.py` 顶部 `reportTypedDictNotRequiredAccess=false`——`AgentState` 是 `total=False`（初始 state 只注入 query/correlation_id，其余键由各节点写入），strict 下读 `state["key"]` 报「键可能缺失」；线性链下 LangGraph 保证各键在节点边界已写入，读是安全的。`graph.py` 顶部 `reportMissingTypeStubs` / `reportUnknownMemberType` / `reportArgumentType=false`——langgraph 命名空间包 + 复杂泛型（`StateNode` / `CompiledStateGraph`）在 pyright strict 下的已知报错（缺 stub、`add_node`/`compile` 部分未知、`Node` 与 `StateNode` 类型不统一），运行时均无问题。
 
 ## 测试要点
 

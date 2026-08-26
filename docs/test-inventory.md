@@ -91,3 +91,14 @@
   - 回归保护：注入 fake `LlmClient` 与 fake `Database`（不触真实 LLM / 真实 SQLite 文件）；`parse_scores` 纯函数单独测全
 - **所属系统**：评测（`backend/bioagent/eval/judge.py` / `evaluate.py`）
 - **阶段**：spec 08-eval 实现
+
+### 09-orchestration：LangGraph 四节点编排
+
+- **新增测试**：
+  - `tests/test_orchestration/test_orchestration.py` — `make_router_node`（fake client 记录参数、返回 JSON）1 条、`make_planner_node`（`sample_rate=0.0` 不评 / `=1.0` 评且参数正确）2 条、`make_executor_node`（Python/R 分派）1 条、`_resolve_files`（`*_file` 路径解析）1 条、`make_reporter_node`（markdown + eval 抽样）1 条、`build_graph` 集成（真实 langgraph 编译 + 全 fake 依赖）1 条，共 7 条
+- **检查方向**：
+  - 功能正确：router 以 `module="router"`/`output_type="intent"`/`json_mode=True`/`correlation_id` 透传调 LLM，prompt 含 `allowed` 全量类别值 + query 文本；planner 以 `registry.for_categories({Category(c)...})` 裁剪工具、`json_mode=True` 产出 plan；executor 按 `tool.runtime` 分派（`Runtime.R`→`runner.run(r_script, args)`、否则 `tool.run(**args)`），每步 `{tool, status:"completed", result}`；reporter 产出 `report`（`json_mode` 缺省）；`build_graph` 集成终态含 `intent`/`categories`/`plan`/`steps`/`report`，四节点按序（router→planner→reporter，executor 不调 LLM）
+  - 边界鲁棒：`_resolve_files` 只解析 `*_file` 结尾的 str 值成 `upload_dir` 绝对路径、非 str（如 int）不动；eval 抽样用 `sample_rate=0.0`/`1.0` 两个极端验证确定性（不 mock `random`）
+  - 回归保护：全 fake 注入（`LlmClient`/`ToolRegistry`/`RRunner`/`Database`/`RagClient`，不触真实 LLM/R/文件系统）；集成测试用真实 `langgraph` 编译验证图拓扑 `START→router→planner→executor→reporter→END`
+- **所属系统**：编排（`backend/bioagent/orchestration/state.py` / `nodes.py` / `graph.py`）
+- **阶段**：spec 09-orchestration 实现

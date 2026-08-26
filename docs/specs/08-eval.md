@@ -38,7 +38,7 @@
 
 ```python
 import json
-from typing import Any
+from typing import Any, cast
 
 from bioagent.llm.client import LlmClient, LlmMessage
 from bioagent.types import EvalScores, LLMOutput
@@ -111,11 +111,12 @@ def _to_float(value: Any) -> float:
 def parse_scores(content: str) -> EvalScores:
     """解析 judge JSON 为 EvalScores；缺键/坏 JSON/非数字计 0，不抛。纯函数。"""
     try:
-        data: Any = json.loads(content)
+        raw: Any = json.loads(content)
     except json.JSONDecodeError:
-        data = {}
-    if not isinstance(data, dict):
-        data = {}
+        raw = {}
+    if not isinstance(raw, dict):
+        raw = {}
+    data = cast(dict[str, Any], raw)
     return {
         "format": _to_float(data.get("format")),
         "relevance": _to_float(data.get("relevance")),

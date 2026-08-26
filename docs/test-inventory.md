@@ -80,3 +80,14 @@
   - 回归保护：mock `AsyncQdrantClient` 与 `SentenceTransformer`（不连真实 Qdrant、不下载真实模型）；锁定 `upsert`（非 `upload_points`——1.19.0 里后者是同步方法，`await` 会运行时崩）
 - **所属系统**：RAG（`backend/bioagent/rag.py`）
 - **阶段**：spec 07-rag 实现
+
+### 08-eval：评测（两个 judge + 落库）
+
+- **新增测试**：
+  - `tests/test_eval/test_eval.py` — `parse_scores`（报告 3 维 / 工具 2 维 / 坏 JSON / 非对象 / 非数字，parametrize 5 条）、`judge_report`（fake client 记录参数、返回预设 `LLMOutput`）1 条、`judge_tool_call`（prompt 含 intent 与 tool_calls）1 条、`evaluate_report`（fake db 记录 SQL、返回 `EvalReport` type=report）1 条、`evaluate_tool_call`（type=tool_call）1 条
+- **检查方向**：
+  - 功能正确：`parse_scores` 合法 JSON → 5 维（报告 judge 只 3 键时工具 2 维计 0，反之亦然）；`judge_*` 以 `output_type="eval"`、`json_mode=True`、`module="eval"` 调 `client.complete`，prompt 注入 query/report/intent/tool_calls；`evaluate_*` 写 1 行 `eval_report`、返回 `EvalReport`（`type` 判别 report/tool_call、`output_id==output.id`、`scores` 由 `parse_scores(judge.content)` 得出）
+  - 边界鲁棒：坏 JSON / 非对象（`[1,2]`）/ 非数字（`{"format":"high"}`）对应维度计 0 不抛；`token_usage` 表写 0 行（token 记账归 04-llm，本 spec 不写）
+  - 回归保护：注入 fake `LlmClient` 与 fake `Database`（不触真实 LLM / 真实 SQLite 文件）；`parse_scores` 纯函数单独测全
+- **所属系统**：评测（`backend/bioagent/eval/judge.py` / `evaluate.py`）
+- **阶段**：spec 08-eval 实现

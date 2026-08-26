@@ -24,7 +24,10 @@ export async function readSSE(reader: Reader, onEvent: (snapshot: AgentState) =>
       const payload = raw.startsWith('data: ') ? raw.slice(6) : raw
       const frame = JSON.parse(payload) as AgentState & { done?: boolean; error?: string }
       if (frame.done) return
-      if (frame.error) throw new Error(frame.error)
+      if (frame.error) {
+        reader.cancel().catch(() => {})
+        throw new Error(frame.error)
+      }
       onEvent(frame)
       sep = buffer.indexOf('\n\n')
     }

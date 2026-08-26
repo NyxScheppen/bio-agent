@@ -124,3 +124,14 @@
   - 回归保护：`json.dumps(result)` 不抛（numpy 标量已 `float()`/`.tolist()`，Python 原生 `float`/`int`），防 reporter `json.dumps` 炸；`TOOL` 形状断言防 `discover()` 误注册（`r_script is None` 确保 Python 工具契约）
 - **所属系统**：单基因表达分析工具（`backend/bioagent/tools/single_gene/expression.py`）
 - **阶段**：spec 11-single-gene 实现
+
+### 12-dge：差异表达分析工具（R limma）
+
+- **新增测试**：
+  - `tests/test_tools_dge/test_dge.py` — `TOOL` 形状 1 条、`register()` 契约 1 条、R 脚本 stdin/stdout + limma 流程 1 条、样本对齐下限 1 条、样本校验 1 条，共 5 条
+- **检查方向**：
+  - 功能正确：`TOOL` 导出 `name`/`category`/`runtime`/`r_script`/`run`（R 工具 `run=None`）；`register()` 通过 R 工具契约校验（`r_script` 非空 + `run is None`）；R 脚本文本含 `fromJSON(file("stdin"))` → `lmFit` → `eBayes` → `topTable` → `cat(jsonlite::toJSON(...))` 完整 limma 流程（stdin 读 args JSON / stdout 输出 JSON）
+  - 边界鲁棒：R 脚本含 `if (length(case) < 2 || length(control) < 2)` + `stop(...)`（退化输入走非零退出 → 06-r-runner 转 `RRuntimeError`）；含 `setdiff(c(args$case, args$control), colnames(mat))` 且缺失即 `stop`（样本名不在矩阵 → 非零退出）
+  - 回归保护：字符串断言 R 脚本文本（不真跑 Rscript、不依赖真实 R/limma 环境，与 06-r-runner 一致）；`register()` 契约断言防 R 工具声明错误（`run` 非空或 `r_script` 空 → `ValueError`）
+- **所属系统**：差异表达分析工具（`backend/bioagent/tools/dge/limma_dge.py` / `backend/bioagent/r_scripts/limma_dge.R`）
+- **阶段**：spec 12-dge 实现

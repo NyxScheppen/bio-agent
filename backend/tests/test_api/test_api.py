@@ -3,6 +3,7 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
 
+import pytest
 import pytest_asyncio
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -16,7 +17,7 @@ from bioagent.api import (
 )
 from bioagent.config import Config
 from bioagent.db import Database, connect
-from bioagent.enums import Category, Runtime
+from bioagent.enums import Category, Runtime, TaskStatus
 from bioagent.tools import ToolRegistry
 from bioagent.types import ToolDefinition
 
@@ -108,7 +109,7 @@ async def test_create_task(db: Database) -> None:
 async def test_set_task_status(db: Database) -> None:
     await create_task(db, "t-2", "q")
     before = (await _get_task(db, "t-2"))["updated_at"]
-    await set_task_status(db, "t-2", "running")
+    await set_task_status(db, "t-2", TaskStatus.RUNNING)
     row = await _get_task(db, "t-2")
     assert row["status"] == "running"
     assert row["updated_at"] >= before
@@ -227,6 +228,23 @@ async def test_upload(db: Database, tmp_path: Path) -> None:
         row = await cursor.fetchone()
     assert row is not None
     assert row["original_name"] == "data.csv"
+
+
+async def test_upload_rejects_bad_type(db: Database, tmp_path: Path) -> None:
+    app = _make_app(db, _FakeGraph([]), ToolRegistry(), _cfg(tmp_path))
+    client = TestClient(app)
+    resp = client.post("/uploads", files={"file": ("data.xlsx", b"x", "application/octet-stream")})
+    assert resp.status_code == 415
+
+
+async def test_upload_rejects_oversize(
+    db: Database, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("bioagent.api._MAX_UPLOAD_SIZE", 4)
+    app = _make_app(db, _FakeGraph([]), ToolRegistry(), _cfg(tmp_path))
+    client = TestClient(app)
+    resp = client.post("/uploads", files={"file": ("data.csv", b"a,b\n1,2\n", "text/csv")})
+    assert resp.status_code == 413
 
 
 async def test_tools(db: Database, tmp_path: Path) -> None:

@@ -16,6 +16,9 @@ log = logging.getLogger(__name__)
 
 router = APIRouter()
 
+_MAX_UPLOAD_SIZE = 100 * 1024 * 1024  # 100MB（how-security.md:16）
+_ALLOWED_SUFFIXES = {".csv", ".tsv", ".txt"}
+
 
 # ---- 请求 / 响应模型 ----
 class ChatRequest(BaseModel):
@@ -49,11 +52,11 @@ async def create_task(db: Database, task_id: str, message: str) -> None:
         await db.conn.commit()
 
 
-async def set_task_status(db: Database, task_id: str, status: str) -> None:
+async def set_task_status(db: Database, task_id: str, status: TaskStatus) -> None:
     async with db.lock:
         await db.conn.execute(
             "UPDATE task SET status = ?, updated_at = ? WHERE id = ?",
-            (status, time.time(), task_id),
+            (status.value, time.time(), task_id),
         )
         await db.conn.commit()
 
@@ -96,7 +99,7 @@ async def chat(req: ChatRequest, request: Request) -> StreamingResponse:
     await create_task(state.db, task_id, req.message)  # 建 task 失败 = 正常 500
 
     async def stream():
-        await set_task_status(state.db, task_id, TaskStatus.RUNNING.value)
+        await set_task_status(state.db, task_id, TaskStatus.RUNNING)
         initial: dict[str, Any] = {"query": req.message, "correlation_id": task_id}
         final: dict[str, Any] = initial
         try:
@@ -158,11 +161,16 @@ async def get_task(task_id: str, request: Request) -> TaskDetail:
 @router.post("/uploads")
 async def upload(request: Request, file: UploadFile = File(...)) -> dict[str, Any]:
     state = request.app.state
+    suffix = Path(file.filename or "").suffix.lower()
+    if suffix not in _ALLOWED_SUFFIXES:
+        raise HTTPException(status_code=415, detail="仅支持 CSV/TSV/TXT 文件")
     file_id = str(uuid.uuid4())
     upload_dir = Path(state.cfg.storage.upload_dir)
     upload_dir.mkdir(parents=True, exist_ok=True)
     path = upload_dir / file_id
-    content = await file.read()  # 整读内存：MVP 小文件够用（见决策 7）
+    content = await file.read(_MAX_UPLOAD_SIZE + 1)  # 上限 +1 探测超限，防 OOM
+    if len(content) > _MAX_UPLOAD_SIZE:
+        raise HTTPException(status_code=413, detail="文件超过 100MB 上限")
     path.write_bytes(content)
     now = time.time()
     async with state.db.lock:

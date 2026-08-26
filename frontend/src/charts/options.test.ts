@@ -46,6 +46,16 @@ describe('options.ts 纯函数', () => {
     expect(seriesOf(barplotOption(data))[0].type).toBe('bar')
   })
 
+  it('barplotOption p_value=0 不产生 Infinity', () => {
+    const data: BarplotResult = {
+      go: [{ id: 'GO:1', term: 'a', p_value: 0, adj_p_value: 0.05, gene_count: 3 }],
+      kegg: [],
+    }
+    const series = seriesOf(barplotOption(data))[0]
+    const values = series.data as number[]
+    expect(values.every((v) => Number.isFinite(v))).toBe(true)
+  })
+
   it('networkOption 返回 graph', () => {
     const data: NetworkResult = {
       nodes: [{ id: 'a', degree: 1 }],

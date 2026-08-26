@@ -42,7 +42,7 @@
 4. **不接 checkpointer（resume 不做）**：`build_graph` 不接收 checkpointer，`compile()` 不带参数。SSE 流式用 `graph.astream()`，**不需要** checkpointer；checkpoint（失败续跑/人机交互）是 MVP 之外的增强。将来要加 = `compile(checkpointer=AsyncSqliteSaver(...))` 一个参数的事，但那是独立文件/独立 sqlite，别和 03-db 的 `task` 表混。
 5. **错误处理 = 异常上抛**：节点里 LLM 坏 JSON、工具抛错、R 非零退出都不捕获，直接向上抛。10-api 捕获后把 task 置 `FAILED`。不做「优雅错误节点 / 部分步骤失败继续」，那会让「报告里混进失败步骤」变成常态，属过度设计。
 6. **`correlation_id = task id`**：10-api 生成 uuid（同时作为 `task` 表主键与 `correlation_id`），注入初始 state，贯穿所有 `client.complete` 调用与 eval 落库，把一次会话的所有 LLM 调用/评测串起来。9 不生成它，只读 `state["correlation_id"]`。
-7. **`*_file` 参数约定（文件解析）**：工具 input_schema 里以 `_file` 结尾的字段（如 `matrix_file` / `clinical_file`）填上传接口返回的 `file_id`；executor 执行前用 `_resolve_files` 把它们解析成 `upload_dir` 下的绝对路径，R/Python 脚本直接 `read.table`/`read_csv` 即可。原因：工具靠 `discover()` 自动发现、拿不到组合根注入的 `upload_dir`，而 R 脚本（06-r-runner）只收 args 无 DB 访问，故解析统一落在 executor（它被注入 `upload_dir`）。
+7. **`*_file` 参数约定（文件解析）**：工具 input_schema 里以 `_file` 结尾的字段（如 `matrix_file` / `clinical_file`）填上传接口返回的 `file_id`；executor 执行前用 `_resolve_files` 把它们解析成 `upload_dir` 下的绝对路径，R/Python 脚本直接 `read.table`/`read_csv` 即可。原因：工具靠 `discover()` 自动发现、拿不到组合根注入的 `upload_dir`，而 R 脚本（06-r-runner）只收 args 无 DB 访问，故解析统一落在 executor（它被注入 `upload_dir`）。安全：`file_id` 来自 LLM 填的 args，不可信——`_resolve_files` 校验其是合法 uuid 且 realpath 仍落在 `upload_dir` 内，否则抛 `ValueError`（防路径穿越，见 how-security.md:17）。
 8. **RAG 接地在 planner + reporter（两处）**：planner 规划前、reporter 写报告前，各用 `rag.query(query)` 取 top_k 相关语料拼进 prompt——planner 用地接地规划、reporter 用地回答「用户问知识」。检索失败按决策 5 异常上抛（qdrant 未起 = 任务 FAILED）；collection 为空只返回空列表，prompt 用「（无相关语料）」占位，不阻断。`rag` 由组合根（10-api）构造并注入（07-rag）。
 
 ### `backend/bioagent/orchestration/state.py`（完整）
@@ -73,6 +73,7 @@ class AgentState(TypedDict, total=False):
 import json
 import os
 import random
+import re
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -194,16 +195,28 @@ def make_planner_node(
     return planner
 
 
+_FILE_ID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+
+
 def _resolve_files(args: dict[str, Any], upload_dir: str) -> dict[str, Any]:
     """把 *_file 字段的值（file_id）解析成 upload_dir 下的绝对路径。
 
     约定：工具 input_schema 里以 _file 结尾的字段（matrix_file / clinical_file）填的是
     上传接口返回的 file_id；executor 在这里统一解析成绝对路径，R/Python 脚本直接 read。
+
+    安全：file_id 须是合法 uuid（上传接口命名格式），且解析后的 realpath 仍落在 upload_dir
+    内（防路径穿越，见 how-security.md:17）；非法即抛 ValueError，由 10-api 转 FAILED。
     """
+    real_dir = os.path.realpath(upload_dir)
     resolved = dict(args)
     for key, value in args.items():
         if key.endswith("_file") and isinstance(value, str):
-            resolved[key] = os.path.join(upload_dir, value)
+            if not _FILE_ID_RE.fullmatch(value):
+                raise ValueError(f"{key} 不是合法 file_id: {value!r}")
+            path = os.path.join(upload_dir, value)
+            if os.path.commonpath([os.path.realpath(path), real_dir]) != real_dir:
+                raise ValueError(f"{key} 越出上传目录: {value!r}")
+            resolved[key] = path
     return resolved
 
 
@@ -305,7 +318,7 @@ def build_graph(
   - [ ] `make_router_node`：fake client（`complete` 记录参数、返回 content=JSON 的 `LLMOutput`）→ 节点返回 `{"intent": ..., "categories": [...]}`；断言 `module=="router"`、`output_type=="intent"`、`json_mode=True`、`correlation_id` 透传、prompt（`messages[0]["content"]`）含 `allowed` 全量类别值 + query 文本
   - [ ] `make_planner_node`：fake client 返回 `{"steps":[...]}` JSON → 节点返回 `{"plan": [...]}`；断言 `registry.for_categories` 收到 `{Category(c) for c in categories}`；prompt 含工具名与 input_schema；fake `rag.query` 收到 `state["query"]`、返回的 docs 文本进了 prompt（`knowledge` 占位）；`sample_rate=0.0` → `evaluate_tool_call` 不被调；`sample_rate=1.0` → 被调且参数 `(client, db, output, query, intent, plan)` 正确
   - [ ] `make_executor_node`：fake registry 注册 1 个 Python 工具（`run` 记录 kwargs）+ 1 个 R 工具（`r_script="km.R"`）；plan 两步 → `steps` 长度 2、每步 `{tool, status:"completed", result}`；断言 R 步走 `runner.run("km.R", args)`、Python 步走 `tool.run(**args)`
-  - [ ] `_resolve_files`：`{"matrix_file": "abc", "n": 3}` → `{"matrix_file": "<upload_dir>/abc", "n": 3}`（`*_file` 结尾的 str 值解析成路径、其余不动）；`{"matrix_file": 5}`（非 str）→ 不动
+  - [ ] `_resolve_files`：`{"matrix_file": "<uuid>", "n": 3}` → `{"matrix_file": "<upload_dir>/<uuid>", "n": 3}`（`*_file` 结尾的 str 值解析成路径、其余不动）；`{"matrix_file": 5}`（非 str）→ 不动；非法 file_id（非 uuid 如 `"abc"`、路径穿越 `"../etc/passwd"`）→ `ValueError`
   - [ ] `make_reporter_node`：fake client 返回 markdown → 节点返回 `{"report": markdown}`；断言 `json_mode` 缺省（报告非 JSON）；fake `rag.query` 收到 query 且 docs 文本进了 prompt；`sample_rate=1.0` → `evaluate_report` 被调且 `report == output.content`
 - [ ] 集成测试 `tests/test_orchestration/`（真实 `langgraph` 编译 + 全 fake 依赖）：
   - [ ] `build_graph`：注入「按 `module` 分派返回值的 fake client」（router→JSON / planner→JSON / reporter→markdown）+ fake registry + fake runner + fake db + fake rag（`query` 返回 `[]`）→ `compile()` 返回对象；`await graph.ainvoke({"query": ..., "correlation_id": ...})` → 终态含 `intent` / `categories` / `plan` / `steps` / `report`，且四节点按序执行（fake client 记录 module 调用顺序 = router → planner → reporter，executor 不调 LLM）

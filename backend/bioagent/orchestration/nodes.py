@@ -2,6 +2,7 @@
 import json
 import os
 import random
+import re
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -123,16 +124,28 @@ def make_planner_node(
     return planner
 
 
+_FILE_ID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+
+
 def _resolve_files(args: dict[str, Any], upload_dir: str) -> dict[str, Any]:
     """把 *_file 字段的值（file_id）解析成 upload_dir 下的绝对路径。
 
     约定：工具 input_schema 里以 _file 结尾的字段（matrix_file / clinical_file）填的是
     上传接口返回的 file_id；executor 在这里统一解析成绝对路径，R/Python 脚本直接 read。
+
+    安全：file_id 须是合法 uuid（上传接口命名格式），且解析后的 realpath 仍落在 upload_dir
+    内（防路径穿越，见 how-security.md:17）；非法即抛 ValueError，由 10-api 转 FAILED。
     """
+    real_dir = os.path.realpath(upload_dir)
     resolved = dict(args)
     for key, value in args.items():
         if key.endswith("_file") and isinstance(value, str):
-            resolved[key] = os.path.join(upload_dir, value)
+            if not _FILE_ID_RE.fullmatch(value):
+                raise ValueError(f"{key} 不是合法 file_id: {value!r}")
+            path = os.path.join(upload_dir, value)
+            if os.path.commonpath([os.path.realpath(path), real_dir]) != real_dir:
+                raise ValueError(f"{key} 越出上传目录: {value!r}")
+            resolved[key] = path
     return resolved
 
 

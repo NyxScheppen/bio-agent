@@ -264,10 +264,12 @@ async def test_executor_node() -> None:
     runner = _FakeRunner()
 
     node = make_executor_node(cast(ToolRegistry, registry), cast(RRunner, runner), "/uploads")
+    matrix_fid = "11111111-2222-3333-4444-555555555555"
+    clinical_fid = "66666666-7777-8888-9999-aaaaaaaaaaaa"
     state: AgentState = {
         "plan": [
-            {"tool": "summarize", "args": {"matrix_file": "abc", "n": 3}},
-            {"tool": "km", "args": {"clinical_file": "xyz"}},
+            {"tool": "summarize", "args": {"matrix_file": matrix_fid, "n": 3}},
+            {"tool": "km", "args": {"clinical_file": clinical_fid}},
         ],
     }
     result = await node(state)
@@ -275,18 +277,26 @@ async def test_executor_node() -> None:
     assert len(steps) == 2
     assert steps[0] == {"tool": "summarize", "status": "completed", "result": {"value": 1}}
     assert steps[1] == {"tool": "km", "status": "completed", "result": {"r": "ok"}}
-    assert py_calls == [{"matrix_file": os.path.join("/uploads", "abc"), "n": 3}]
-    assert runner.calls == [("km.R", {"clinical_file": os.path.join("/uploads", "xyz")})]
+    assert py_calls == [{"matrix_file": os.path.join("/uploads", matrix_fid), "n": 3}]
+    assert runner.calls == [("km.R", {"clinical_file": os.path.join("/uploads", clinical_fid)})]
 
 
 # ---- _resolve_files ----
 
 def test_resolve_files() -> None:
-    assert _resolve_files({"matrix_file": "abc", "n": 3}, "/uploads") == {
-        "matrix_file": os.path.join("/uploads", "abc"),
+    fid = "01234567-89ab-cdef-0123-456789abcdef"
+    assert _resolve_files({"matrix_file": fid, "n": 3}, "/uploads") == {
+        "matrix_file": os.path.join("/uploads", fid),
         "n": 3,
     }
     assert _resolve_files({"matrix_file": 5}, "/uploads") == {"matrix_file": 5}
+
+
+def test_resolve_files_rejects() -> None:
+    with pytest.raises(ValueError):
+        _resolve_files({"matrix_file": "abc"}, "/uploads")
+    with pytest.raises(ValueError):
+        _resolve_files({"matrix_file": "../etc/passwd"}, "/uploads")
 
 
 # ---- make_reporter_node ----

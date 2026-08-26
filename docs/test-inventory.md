@@ -95,10 +95,10 @@
 ### 09-orchestration：LangGraph 四节点编排
 
 - **新增测试**：
-  - `tests/test_orchestration/test_orchestration.py` — `make_router_node`（fake client 记录参数、返回 JSON）1 条、`make_planner_node`（`sample_rate=0.0` 不评 / `=1.0` 评且参数正确）2 条、`make_executor_node`（Python/R 分派）1 条、`_resolve_files`（`*_file` 路径解析）1 条、`make_reporter_node`（markdown + eval 抽样）1 条、`build_graph` 集成（真实 langgraph 编译 + 全 fake 依赖）1 条，共 7 条
+  - `tests/test_orchestration/test_orchestration.py` — `make_router_node`（fake client 记录参数、返回 JSON）1 条、`make_planner_node`（`sample_rate=0.0` 不评 / `=1.0` 评且参数正确）2 条、`make_executor_node`（Python/R 分派）1 条、`_resolve_files`（合法 uuid 解析 1 条 + 非法 file_id/路径穿越拒绝 1 条）2 条、`make_reporter_node`（markdown + eval 抽样）1 条、`build_graph` 集成（真实 langgraph 编译 + 全 fake 依赖）1 条，共 8 条
 - **检查方向**：
   - 功能正确：router 以 `module="router"`/`output_type="intent"`/`json_mode=True`/`correlation_id` 透传调 LLM，prompt 含 `allowed` 全量类别值 + query 文本；planner 以 `registry.for_categories({Category(c)...})` 裁剪工具、`json_mode=True` 产出 plan；executor 按 `tool.runtime` 分派（`Runtime.R`→`runner.run(r_script, args)`、否则 `tool.run(**args)`），每步 `{tool, status:"completed", result}`；reporter 产出 `report`（`json_mode` 缺省）；`build_graph` 集成终态含 `intent`/`categories`/`plan`/`steps`/`report`，四节点按序（router→planner→reporter，executor 不调 LLM）
-  - 边界鲁棒：`_resolve_files` 只解析 `*_file` 结尾的 str 值成 `upload_dir` 绝对路径、非 str（如 int）不动；eval 抽样用 `sample_rate=0.0`/`1.0` 两个极端验证确定性（不 mock `random`）
+  - 边界鲁棒：`_resolve_files` 只解析 `*_file` 结尾的 str 值成 `upload_dir` 绝对路径、非 str（如 int）不动；非法 file_id（非 uuid 如 `"abc"`、路径穿越 `"../etc/passwd"`）→ `ValueError`；eval 抽样用 `sample_rate=0.0`/`1.0` 两个极端验证确定性（不 mock `random`）
   - 回归保护：全 fake 注入（`LlmClient`/`ToolRegistry`/`RRunner`/`Database`/`RagClient`，不触真实 LLM/R/文件系统）；集成测试用真实 `langgraph` 编译验证图拓扑 `START→router→planner→executor→reporter→END`
 - **所属系统**：编排（`backend/bioagent/orchestration/state.py` / `nodes.py` / `graph.py`）
 - **阶段**：spec 09-orchestration 实现
@@ -106,10 +106,10 @@
 ### 10-api：FastAPI 端点 + 组合根
 
 - **新增测试**：
-  - `tests/test_api/test_api.py` — task CRUD 单元（`create_task`/`set_task_status`/`complete_task`/`fail_task`）4 条 + 端点集成（`/chat` 成功流、`/chat` 失败、`/chat` 空 message 422、`/tasks` 倒序、`/tasks/{id}` 详情 + 404、`/uploads`、`/tools`）7 条，共 11 条
+  - `tests/test_api/test_api.py` — task CRUD 单元（`create_task`/`set_task_status`/`complete_task`/`fail_task`）4 条 + 端点集成（`/chat` 成功流、`/chat` 失败、`/chat` 空 message 422、`/tasks` 倒序、`/tasks/{id}` 详情 + 404、`/uploads` 成功/非法类型 415/超限 413、`/tools`）9 条，共 13 条
 - **检查方向**：
   - 功能正确：`create_task` 写 task 一行（`status="pending"`、`plan/steps="[]"`、`report=""`）；`set_task_status` 更新 status + `updated_at`；`complete_task` 写 `status="completed"` + plan/steps（`json.dumps`）+ report；`fail_task` 写 `status="failed"` + error；`/chat` 用 fake graph（`astream` yield 预设 state）→ SSE `data:` 行流、末条 `{"done": true, task_id}`、task 置 completed；`/tasks` 按 `created_at` 倒序摘要、`/tasks/{id}` 返回完整 detail（plan/steps 已 `json.loads`）；`/uploads` 落盘 uuid 重命名 + 写 upload 表；`/tools` 返回工具元数据（name/category/runtime/input_schema/frontend）
-  - 边界鲁棒：`/chat` 失败（fake `astream` 抛异常）→ 流末条含 `error`、task 置 `failed` 且 error 落库；`/chat` 空 message → 422（`min_length=1`）；`/tasks/nope` → 404
+  - 边界鲁棒：`/chat` 失败（fake `astream` 抛异常）→ 流末条含 `error`、task 置 `failed` 且 error 落库；`/chat` 空 message → 422（`min_length=1`）；`/uploads` 非法类型（`.xlsx`）→ 415、超限（monkeypatch `_MAX_UPLOAD_SIZE`）→ 413；`/tasks/nope` → 404
   - 回归保护：task CRUD 用真实 aiosqlite `:memory:`（验证 SQL 真落库）；端点集成用裸 `FastAPI` + 手动 `app.state`（**不跑 lifespan**）+ fake graph/registry 注入，不触真实 LLM/R/上传目录（`tmp_path` 当 `upload_dir`）；`/tools` 验证 `frontend` 字段透传
 - **所属系统**：API 层（`backend/bioagent/main.py` / `api.py`）
 - **阶段**：spec 10-api 实现
@@ -172,7 +172,7 @@
 ### 16-frontend：前端（React + Vite + TS + ECharts + Tailwind）
 
 - **新增测试**：
-  - `src/charts/options.test.ts` — 五种 `*Option` 纯函数各 1 条（boxplot/volcano/barplot/network/km_curve 返回确定性 option、`series.type` 正确、空 genes 空 series 不抛）+ boxplot 中位数取 `summary.median` 1 条 + volcano p=0 不产生 Infinity 1 条，共 7 条
+  - `src/charts/options.test.ts` — 五种 `*Option` 纯函数各 1 条（boxplot/volcano/barplot/network/km_curve 返回确定性 option、`series.type` 正确、空 genes 空 series 不抛）+ boxplot 中位数取 `summary.median` 1 条 + volcano p=0 不产生 Infinity 1 条 + barplot p=0 不产生 Infinity 1 条，共 8 条
   - `src/hooks/useSSE.test.ts` — 逐帧 onEvent + done 结束 1 条、非 200 置 error 并 reject 1 条、stop() 中止 reader 1 条，共 3 条
   - `src/stores/chatStore.test.ts` — send 入消息/快照随帧更新/report 后 done 1 条、error 帧 → status error 1 条，共 2 条
   - `src/components/ResultChart.test.tsx` — limma_dge→volcano→scatter 分发 1 条、未知 result_type→JSON 不崩 1 条，共 2 条
@@ -181,7 +181,7 @@
   - `src/stores/taskStore.test.ts` — `open` 取回任务并把 plan/steps/report 回填主视图（`chatStore.currentState`/`status="done"`）1 条、失败任务回填 `status="error"` 1 条，共 2 条
 - **检查方向**：
   - 功能正确：五种 `*Option` 是纯函数（同输入同输出、含期望 `series.type`、`xAxis`/`yAxis` 等关键字段无 `undefined`）；`useSSE` 的 `run` POST 后按 `\n\n` 切帧、剥 `data: ` 前缀 JSON.parse，done 帧 resolve / error 帧 reject / 否则 `onEvent(快照)`；`chatStore.send` 入用户消息 + 逐帧写 `currentState`、report 出现后 `status="done"`；`taskStore.open` 取 `TaskDetail` 后把 plan/steps/report 回填 `chatStore.currentState`（复用主视图渲染），失败任务回填 `status="error"`；`ResultChart` 按 `tool→result_type` 分发到对应 `*Option`，未知类型回退 JSON；`FileUpload` 选文件后调 `client.upload` 写 `fileId`
-  - 边界鲁棒：`volcanoOption` 空 genes 返空 series 不抛、p=0 时 `-log10` clamp 不产生 Infinity；`boxplotOption` 中位数取 `summary.median`（非 floor 下标）、q1/q3 线性插值；`useSSE` 非 200 置 `error` 并 reject、error 帧 `reader.cancel()` 后 reject；`stop()` 调 `reader.cancel()` 中止读取；`ResultChart` 未知 result_type 渲染 `<pre>` JSON 而非崩；`StepList` 失败任务时已完成步骤仍 ✓
+  - 边界鲁棒：`volcanoOption` 空 genes 返空 series 不抛、p=0 时 `-log10` clamp 不产生 Infinity；`barplotOption` p=0 时同样 `-log10` clamp 不产生 Infinity；`boxplotOption` 中位数取 `summary.median`（非 floor 下标）、q1/q3 线性插值；`useSSE` 非 200 置 `error` 并 reject、error 帧 `reader.cancel()` 后 reject；`stop()` 调 `reader.cancel()` 中止读取；`ResultChart` 未知 result_type 渲染 `<pre>` JSON 而非崩；`StepList` 失败任务时已完成步骤仍 ✓
   - 回归保护：mock 全局 `fetch`（`vi.stubGlobal`）返回 fake 流（`vi.fn` 逐步 yield 帧），不真连后端；`ResultChart` mock `ECharts` 组件（echarts `init` 在 jsdom 无 canvas 会失败），断言 series.type 而非真实渲染；`FileUpload` mock `client.upload`；`taskStore` mock `client.getTask` 返回预设 `TaskDetail`，断言跨 store 回填而非真实 HTTP；测试不依赖真实 ECharts/DOM 布局
 - **所属系统**：前端（`frontend/src/{charts,hooks,stores,components}`）
 - **阶段**：spec 16-frontend 实现

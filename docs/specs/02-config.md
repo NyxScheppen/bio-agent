@@ -25,7 +25,8 @@
 ## 技术方案
 
 - **新文件**：`backend/bioagent/config.py`、`config.yaml`（无 Facade、无 API、无数据变更）
-- **库**：PyYAML；`load_config` 用 `SafeLoader` 子类 `_UniqueKeyLoader`（重复键报 `ConfigError`，杜绝默认 last-wins 静默覆盖）
+- **库**：PyYAML、python-dotenv（`load_dotenv()` 读 `.env` 注入环境变量，供 04-llm 读 API key）；`load_config` 用 `SafeLoader` 子类 `_UniqueKeyLoader`（重复键报 `ConfigError`，杜绝默认 last-wins 静默覆盖）
+- **.env 注入**：`load_config()` 入口调 `load_dotenv()` 读 `.env`（API key 等）注入环境变量；仓库提供 `.env.example` 模板（空值）、`.env` 已被 `.gitignore` 忽略（how-security.md:9-11）
 - **公开面**：`from bioagent.config import Config, load_config, validate_config`（不加 `__all__`；`ConfigError` 与各分段 dataclass 如 `LlmConfig` 也直接可导，04-llm 会 import）
 - **同步加载**（启动时一次性，event loop 未起，非运行期 I/O）
 - **递归构造**：`_build` 看到字段类型是 dataclass 就递归构造，所以嵌套段会变成对应 dataclass
@@ -69,6 +70,7 @@ from pathlib import Path
 from typing import Any, cast
 
 import yaml
+from dotenv import load_dotenv
 
 
 class ConfigError(Exception):
@@ -167,6 +169,7 @@ _UniqueKeyLoader.add_constructor(
 
 
 def load_config(path: str | None = None) -> Config:
+    load_dotenv()  # 读 .env 注入环境变量（API key 等），见 how-security.md:9
     # 1) 解析路径：显式 path > BIOAGENT_CONFIG 环境变量 > 默认 "config.yaml"
     resolved = path or os.environ.get("BIOAGENT_CONFIG") or "config.yaml"
     try:

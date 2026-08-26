@@ -39,8 +39,8 @@
 3. **失败落 error 列**：task 表有 `error` 列（`str | None`，03-db 已加）。失败时 `fail_task` 把错误文本写进 `error`，同时走 SSE `error` 事件 + 服务端日志（`log.exception`）；`TaskDetail` 带 `error` 字段，任务历史能回看失败原因。
 4. **task 一次性写**：MVP 只在结束/失败时写一次 plan/steps/report（非每节点增量写）；中途崩溃 task 停在 `RUNNING`。逐节点持久化是「未请求的灵活性」，不做。
 5. **SSE 用 POST 流式 + 自定义 hook**：`POST /chat` 直接返回 `StreamingResponse(text/event-stream)`，前端用 `fetch` 读流（`hooks/useSSE.ts`，见 16）。**不用原生 `EventSource`**（它只支持 GET、不能带 POST body）。SSE 事件统一 `data: <json>\n\n`，无 `event:` 字段；前端按 payload 是否有 `done`/`error` 键判别事件类型。
-6. **CORS 开发期放开**：`allow_origins=["*"]`（Vite 前端跨域）；上线收紧为白名单。
-7. **上传整读内存**：`await file.read()` 全量读（MVP 小 CSV/TSV 够用）；表达矩阵变大换 `aiofiles` 分块写。`write_bytes` 是同步 I/O，会短暂阻塞 event loop，MVP 接受。
+6. **CORS 仅前端 origin**：`allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"]`（Vite dev 端口）；生产同源部署时收紧为同源白名单（how-security.md:33）。
+7. **上传限类型 + 大小**：先校验后缀（CSV/TSV/TXT，否则 415），再 `await file.read(_MAX_UPLOAD_SIZE + 1)` 读上限 +1 字节探测超限（超 100MB 抛 413），防大文件 OOM（how-security.md:16）。`write_bytes` 是同步 I/O，会短暂阻塞 event loop，MVP 接受。
 8. **`load_config` 延迟到 lifespan**：`create_app()` 不在 import 时读 `config.yaml`（放在 lifespan 里），测试可 `create_app(cfg)` 注入配置、或直接裸 `FastAPI` + `include_router(router)` + 手动填 `app.state` 测路由。
 
 ### `backend/bioagent/main.py`（完整）
@@ -92,7 +92,7 @@ def create_app(config: Config | None = None) -> FastAPI:
     app = FastAPI(title="bioagent", lifespan=lifespan)
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],   # 开发期放开；上线收紧为白名单
+        allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],  # 仅前端 dev origin（how-security.md:33）
         allow_methods=["*"],
         allow_headers=["*"],
     )
@@ -123,6 +123,9 @@ from bioagent.enums import TaskStatus
 log = logging.getLogger(__name__)
 
 router = APIRouter()
+
+_MAX_UPLOAD_SIZE = 100 * 1024 * 1024  # 100MB（how-security.md:16）
+_ALLOWED_SUFFIXES = {".csv", ".tsv", ".txt"}
 
 
 # ---- 请求 / 响应模型 ----
@@ -157,11 +160,11 @@ async def create_task(db: Database, task_id: str, message: str) -> None:
         await db.conn.commit()
 
 
-async def set_task_status(db: Database, task_id: str, status: str) -> None:
+async def set_task_status(db: Database, task_id: str, status: TaskStatus) -> None:
     async with db.lock:
         await db.conn.execute(
             "UPDATE task SET status = ?, updated_at = ? WHERE id = ?",
-            (status, time.time(), task_id),
+            (status.value, time.time(), task_id),
         )
         await db.conn.commit()
 
@@ -204,7 +207,7 @@ async def chat(req: ChatRequest, request: Request) -> StreamingResponse:
     await create_task(state.db, task_id, req.message)  # 建 task 失败 = 正常 500
 
     async def stream():
-        await set_task_status(state.db, task_id, TaskStatus.RUNNING.value)
+        await set_task_status(state.db, task_id, TaskStatus.RUNNING)
         initial: dict[str, Any] = {"query": req.message, "correlation_id": task_id}
         final: dict[str, Any] = initial
         try:
@@ -266,11 +269,16 @@ async def get_task(task_id: str, request: Request) -> TaskDetail:
 @router.post("/uploads")
 async def upload(request: Request, file: UploadFile = File(...)) -> dict[str, Any]:
     state = request.app.state
+    suffix = Path(file.filename or "").suffix.lower()
+    if suffix not in _ALLOWED_SUFFIXES:
+        raise HTTPException(status_code=415, detail="仅支持 CSV/TSV/TXT 文件")
     file_id = str(uuid.uuid4())
     upload_dir = Path(state.cfg.storage.upload_dir)
     upload_dir.mkdir(parents=True, exist_ok=True)
     path = upload_dir / file_id
-    content = await file.read()  # 整读内存：MVP 小文件够用（见决策 7）
+    content = await file.read(_MAX_UPLOAD_SIZE + 1)  # 上限 +1 探测超限，防 OOM
+    if len(content) > _MAX_UPLOAD_SIZE:
+        raise HTTPException(status_code=413, detail="文件超过 100MB 上限")
     path.write_bytes(content)
     now = time.time()
     async with state.db.lock:
@@ -314,6 +322,7 @@ async def list_tools(request: Request) -> list[dict[str, Any]]:
   - [ ] `POST /chat` 空 message → 422（`min_length=1` 校验）
   - [ ] `GET /tasks` → 倒序摘要；`GET /tasks/{id}` → 完整 detail（`plan`/`steps` 已 `json.loads`）；`GET /tasks/nope` → 404
   - [ ] `POST /uploads`（`files=` 上传小文件）→ 返回 `file_id`；`upload_dir` 下出现 uuid 文件、内容一致；`upload` 表一行
+  - [ ] `POST /uploads` 非法类型（`.xlsx`）→ 415；超限（monkeypatch `_MAX_UPLOAD_SIZE` 后传更大文件）→ 413
   - [ ] `GET /tools`（`app.state.registry` 注册 2 个工具）→ 返回 2 条，含 name/category/runtime/input_schema/frontend
 - [ ] E2E 测试：无（不触真实 LLM / 真实 R / 真实上传目录——集成测试用 `tmp_path` 当 `upload_dir`）
 

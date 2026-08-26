@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any, cast
 
 import yaml
+from dotenv import load_dotenv
 
 
 class ConfigError(Exception):
@@ -102,6 +103,7 @@ _UniqueKeyLoader.add_constructor(
 
 
 def load_config(path: str | None = None) -> Config:
+    load_dotenv()  # 读 .env 注入环境变量（API key 等），见 how-security.md:9
     # 1) 解析路径：显式 path > BIOAGENT_CONFIG 环境变量 > 默认 "config.yaml"
     resolved = path or os.environ.get("BIOAGENT_CONFIG") or "config.yaml"
     try:

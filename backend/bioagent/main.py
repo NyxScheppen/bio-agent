@@ -44,7 +44,7 @@ def create_app(config: Config | None = None) -> FastAPI:
     app = FastAPI(title="bioagent", lifespan=lifespan)
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],   # 开发期放开；上线收紧为白名单
+        allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],  # 仅前端 dev origin（how-security.md:33）
         allow_methods=["*"],
         allow_headers=["*"],
     )

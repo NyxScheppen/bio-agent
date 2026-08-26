@@ -50,7 +50,7 @@ export function volcanoOption(data: VolcanoResult): EChartsOption {
 export function barplotOption(data: BarplotResult): EChartsOption {
   const rows = [...data.go, ...data.kegg]
   const terms = rows.map((r) => r.term).reverse()
-  const values = rows.map((r) => -Math.log10(r.p_value)).reverse()
+  const values = rows.map((r) => -Math.log10(Math.max(r.p_value, 1e-300))).reverse()
   return {
     title: { text: '富集分析（-log10 p）', left: 'center' },
     tooltip: { trigger: 'axis' },

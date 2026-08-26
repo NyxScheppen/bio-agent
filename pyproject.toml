@@ -12,6 +12,9 @@ dependencies = [
     "pydantic>=2.0",
     "sentence-transformers==5.6.0",
     "qdrant-client==1.19.0",
+    "fastapi==0.115.6",
+    "python-multipart==0.0.20",
+    "uvicorn==0.34.0",
 ]
 
 [project.optional-dependencies]

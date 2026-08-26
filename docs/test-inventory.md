@@ -102,3 +102,14 @@
   - 回归保护：全 fake 注入（`LlmClient`/`ToolRegistry`/`RRunner`/`Database`/`RagClient`，不触真实 LLM/R/文件系统）；集成测试用真实 `langgraph` 编译验证图拓扑 `START→router→planner→executor→reporter→END`
 - **所属系统**：编排（`backend/bioagent/orchestration/state.py` / `nodes.py` / `graph.py`）
 - **阶段**：spec 09-orchestration 实现
+
+### 10-api：FastAPI 端点 + 组合根
+
+- **新增测试**：
+  - `tests/test_api/test_api.py` — task CRUD 单元（`create_task`/`set_task_status`/`complete_task`/`fail_task`）4 条 + 端点集成（`/chat` 成功流、`/chat` 失败、`/chat` 空 message 422、`/tasks` 倒序、`/tasks/{id}` 详情 + 404、`/uploads`、`/tools`）7 条，共 11 条
+- **检查方向**：
+  - 功能正确：`create_task` 写 task 一行（`status="pending"`、`plan/steps="[]"`、`report=""`）；`set_task_status` 更新 status + `updated_at`；`complete_task` 写 `status="completed"` + plan/steps（`json.dumps`）+ report；`fail_task` 写 `status="failed"` + error；`/chat` 用 fake graph（`astream` yield 预设 state）→ SSE `data:` 行流、末条 `{"done": true, task_id}`、task 置 completed；`/tasks` 按 `created_at` 倒序摘要、`/tasks/{id}` 返回完整 detail（plan/steps 已 `json.loads`）；`/uploads` 落盘 uuid 重命名 + 写 upload 表；`/tools` 返回工具元数据（name/category/runtime/input_schema/frontend）
+  - 边界鲁棒：`/chat` 失败（fake `astream` 抛异常）→ 流末条含 `error`、task 置 `failed` 且 error 落库；`/chat` 空 message → 422（`min_length=1`）；`/tasks/nope` → 404
+  - 回归保护：task CRUD 用真实 aiosqlite `:memory:`（验证 SQL 真落库）；端点集成用裸 `FastAPI` + 手动 `app.state`（**不跑 lifespan**）+ fake graph/registry 注入，不触真实 LLM/R/上传目录（`tmp_path` 当 `upload_dir`）；`/tools` 验证 `frontend` 字段透传
+- **所属系统**：API 层（`backend/bioagent/main.py` / `api.py`）
+- **阶段**：spec 10-api 实现

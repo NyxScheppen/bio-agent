@@ -135,3 +135,14 @@
   - 回归保护：字符串断言 R 脚本文本（不真跑 Rscript、不依赖真实 R/limma 环境，与 06-r-runner 一致）；`register()` 契约断言防 R 工具声明错误（`run` 非空或 `r_script` 空 → `ValueError`）
 - **所属系统**：差异表达分析工具（`backend/bioagent/tools/dge/limma_dge.py` / `backend/bioagent/r_scripts/limma_dge.R`）
 - **阶段**：spec 12-dge 实现
+
+### 13-enrichment：富集分析工具（R clusterProfiler）
+
+- **新增测试**：
+  - `tests/test_tools_enrichment/test_enrichment.py` — `TOOL` 形状 1 条、`register()` 契约 1 条、R 脚本 core 流程 1 条、空基因列表 1 条，共 4 条
+- **检查方向**：
+  - 功能正确：`TOOL` 导出 `name`/`category`/`runtime`/`r_script`/`run`（R 工具 `run=None`）；`register()` 通过 R 工具契约校验；R 脚本文本含 `enrichGO`（`keyType = "SYMBOL"`/BP）、`enrichKEGG`（`tryCatch` 包裹 best-effort）、`cat(jsonlite::toJSON(...))` 完整富集流程
+  - 边界鲁棒：R 脚本含 `if (length(genes) == 0)` + `stop("gene_list 为空")`（空输入走非零退出 → 06-r-runner 转 `RRuntimeError`）；KEGG 失败 `tryCatch` 返空 `data.frame()`（GO 不受影响，与 CLAUDE.md「best-effort 旁路」一致）
+  - 回归保护：字符串断言 R 脚本文本（不真跑 Rscript、不依赖真实 clusterProfiler/org.Hs.eg.db 环境）；`register()` 契约断言防 R 工具声明错误
+- **所属系统**：富集分析工具（`backend/bioagent/tools/enrichment/go_kegg.py` / `backend/bioagent/r_scripts/go_kegg.R`）
+- **阶段**：spec 13-enrichment 实现

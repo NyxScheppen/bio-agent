@@ -31,10 +31,12 @@
 - **同步 pandas 读文件**：`run` 是 `async def`（满足 ToolDefinition.run 的 `Awaitable` 契约），但 pandas 读文件/统计是同步 CPU+磁盘，MVP 小矩阵直接同步做（不套 `asyncio.to_thread`）；矩阵变大再异步化，先不做。
 - **`*_file` 解析在 executor**：`matrix_file` 填的是上传返回的 file_id；executor（09）已把它解析成绝对路径，`run` 收到的就是路径，直接 `read_csv`。工具自身不 import config、不碰 upload 表。
 - **JSON 可序列化是硬约束**：executor 会把 `steps` 交给 reporter `json.dumps`，numpy `float64`/`int64` 会炸。故 `mean/median/std` 全 `float()`、每样本值 `.tolist()`。这是 11-15 所有 Python 工具的通用规则。
+- **pyright 抑制**：pandas 3.0 / scipy 1.17 不带 `py.typed` 类型存根，pyright strict 会把 `df`/`row`/`vals` 与统计方法全判为 unknown（`reportMissingTypeStubs` → `reportUnknownVariableType`/`reportUnknownMemberType`/`reportUnknownArgumentType`/`reportAttributeAccessIssue` 级联）。故文件首行加模块级 `# pyright:` 抑制（与 09-orchestration 对 langgraph 的做法一致），不改类型逻辑。
 
 ### `backend/bioagent/tools/single_gene/expression.py`（完整）
 
 ```python
+# pyright: reportMissingTypeStubs=false, reportUnknownMemberType=false, reportUnknownVariableType=false, reportUnknownArgumentType=false, reportAttributeAccessIssue=false
 from typing import Any
 
 import pandas as pd

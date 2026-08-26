@@ -113,3 +113,14 @@
   - 回归保护：task CRUD 用真实 aiosqlite `:memory:`（验证 SQL 真落库）；端点集成用裸 `FastAPI` + 手动 `app.state`（**不跑 lifespan**）+ fake graph/registry 注入，不触真实 LLM/R/上传目录（`tmp_path` 当 `upload_dir`）；`/tools` 验证 `frontend` 字段透传
 - **所属系统**：API 层（`backend/bioagent/main.py` / `api.py`）
 - **阶段**：spec 10-api 实现
+
+### 11-single-gene：单基因表达分析工具
+
+- **新增测试**：
+  - `tests/test_tools_single_gene/test_single_gene.py` — `run` 成功（3 基因 × 6 样本 TSV）1 条、JSON 可序列化 1 条、基因缺失 / 样本缺失 / 空组 `ValueError` 3 条、单样本组 `sd=None` 1 条、三组 `p_value=None` 1 条、`TOOL` 形状 1 条，共 8 条
+- **检查方向**：
+  - 功能正确：`run` 读 TSV 矩阵（`sep="\t", index_col=0`）按 `groups` 分组，算 `samples`（组→每样本值）+ `summary`（组→{n, mean, median, sd}）+ `p_value`（恰两组 t 检验）；`TOOL` 导出 `name`/`category`/`runtime`/`run`/`r_script` 契约
+  - 边界鲁棒：基因名不在矩阵 / 样本名不在矩阵 / 空组（n=0）→ `ValueError`（消息含对应名）；单样本组（n=1）→ 该组 `sd=None` 且 `p_value=None`（非 `nan`）；组数非 2（给 3 组）→ `p_value=None` 但 `samples`/`summary` 仍返回
+  - 回归保护：`json.dumps(result)` 不抛（numpy 标量已 `float()`/`.tolist()`，Python 原生 `float`/`int`），防 reporter `json.dumps` 炸；`TOOL` 形状断言防 `discover()` 误注册（`r_script is None` 确保 Python 工具契约）
+- **所属系统**：单基因表达分析工具（`backend/bioagent/tools/single_gene/expression.py`）
+- **阶段**：spec 11-single-gene 实现

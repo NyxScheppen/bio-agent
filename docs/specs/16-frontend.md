@@ -25,7 +25,8 @@
 
 ## 技术方案
 
-- **栈**：React 18 + Vite + TypeScript（`strict: true`）+ Zustand + ECharts + Tailwind CSS；测试 Vitest + `@testing-library/react` + `@testing-library/jest-dom`。前端是独立包，质量门不走 Python 的 ruff/pyright/pytest，走 eslint + tsc + vitest。
+- **栈**：React 19 + Vite + TypeScript 5.9（`strict: true`）+ Zustand + ECharts + Tailwind CSS v4（CSS-first，`@tailwindcss/vite` 插件，无 `tailwind.config.js`）；测试 Vitest + `@testing-library/react` + `@testing-library/jest-dom`。前端是独立包，质量门不走 Python 的 ruff/pyright/pytest，走 eslint + tsc + vitest。
+- **版本注**：TypeScript 锁 `^5.9.3` —— TS 7.0 是原生编译器，`typescript-eslint@8` 的 peer 要求 `<6.1.0`，二者不兼容，故回退到 5.x。
 - **ECharts 用法**：`import * as echarts from 'echarts'`（全量引入，MVP 不 tree-shaking，本地作品集体积可接受）；一个薄 `ECharts` 组件（`useRef` + `useEffect` 挂 `echarts.init`，`option` 变化时 `setOption`），不引 `echarts-for-react`。选项构建收敛到 `charts/options.ts` 纯函数，单测不碰 DOM。
 - **SSE 是 POST**：`/chat` 是 POST（EventSource 只支持 GET），故用 `fetch` + `response.body.getReader()` 手写流解析。每帧是 `data: {完整状态快照}\n\n`（10-api `stream_mode="values"`），前端把最新快照写进 `chatStore.currentState`：`plan` 出现=规划完成、`steps` 追加=执行进度、`report` 出现=结束。
 - **步骤显示是线性的**：plan-and-execute 产出线性步骤（不是真 DAG），StepList 是垂直列表不是图。早期「步骤 DAG」的说法在此收敛为「线性步骤列表」。状态来源（09 已定）：`steps` 元素带 `status`（executor 写 `"completed"`），pending = `plan` 中不在 `steps` 里的步骤，failed = 任务级（task `status=="failed"`），无逐步 running（executor 一次性跑完所有步骤）。
@@ -48,9 +49,9 @@ frontend/
   package.json
   vite.config.ts
   tsconfig.json
-  tailwind.config.js
   index.html
   src/
+    index.css              # @import "tailwindcss";（v4 CSS-first）
     main.tsx
     App.tsx
     types.ts              # 共享 TS 类型（见下方「类型定义」）
@@ -178,13 +179,13 @@ interface ChatState {
   messages: Message[];                 // 用户/助手消息
   currentState: AgentState | null;     // 最新 SSE 快照
   status: 'idle' | 'streaming' | 'done' | 'error';
-  send: (message: string) => Promise<void>;  // 调 useSSE 的 run，逐帧更新 currentState
+  send: (message: string) => Promise<void>;  // POST /chat，复用 useSSE 的 readSSE 核心（store action 不能调 hook），逐帧更新 currentState
 }
 ```
 
 ## 测试要点
 
-- [ ] `tests/frontend/`（Vitest + RTL）：
+- [ ] 测试（Vitest + RTL，colocated 为 `src/**/*.test.ts(x)`）：
   - [ ] `options.ts` 纯函数：五种 `*Option` 各返回确定性 option（同输入同输出、含期望的 series.type、无 `undefined` 关键字段）；`volcanoOption` 对空 genes 返回空 series 不抛
   - [ ] `useSSE`：mock `fetch` 返回含多帧 `data: {...}\n\n` 的流 → `onEvent` 按帧逐次收到 JSON；非 200 抛/置 error；`stop()` 中止 reader
   - [ ] `chatStore`：`send` 把用户消息入 messages、`currentState` 随帧更新、末帧含 report 后 status='done'

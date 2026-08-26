@@ -168,3 +168,18 @@
   - 回归保护：字符串断言 R 脚本文本（不真跑 Rscript、不依赖真实 survival 环境）；`seq_along(fit$strata)` + `fit$strata[i]` 切片还原每组 KM 曲线（spec 标注最易写错的点）；`jsonlite::unbox`（标量显式 unbox）+ `levels(group)[i]`（group 名去前缀）
 - **所属系统**：生存分析工具（`backend/bioagent/tools/survival/km_cox.py` / `backend/bioagent/r_scripts/km_cox.R`）
 - **阶段**：spec 15-survival 实现
+
+### 16-frontend：前端（React + Vite + TS + ECharts + Tailwind）
+
+- **新增测试**：
+  - `src/charts/options.test.ts` — 五种 `*Option` 纯函数各 1 条（boxplot/volcano/barplot/network/km_curve 返回确定性 option、`series.type` 正确、空 genes 空 series 不抛），共 5 条
+  - `src/hooks/useSSE.test.ts` — 逐帧 onEvent + done 结束 1 条、非 200 置 error 并 reject 1 条、stop() 中止 reader 1 条，共 3 条
+  - `src/stores/chatStore.test.ts` — send 入消息/快照随帧更新/report 后 done 1 条、error 帧 → status error 1 条，共 2 条
+  - `src/components/ResultChart.test.tsx` — limma_dge→volcano→scatter 分发 1 条、未知 result_type→JSON 不崩 1 条，共 2 条
+  - `src/components/FileUpload.test.tsx` — 选文件→upload→fileId 1 条
+- **检查方向**：
+  - 功能正确：五种 `*Option` 是纯函数（同输入同输出、含期望 `series.type`、`xAxis`/`yAxis` 等关键字段无 `undefined`）；`useSSE` 的 `run` POST 后按 `\n\n` 切帧、剥 `data: ` 前缀 JSON.parse，done 帧 resolve / error 帧 reject / 否则 `onEvent(快照)`；`chatStore.send` 入用户消息 + 逐帧写 `currentState`、report 出现后 `status="done"`；`ResultChart` 按 `tool→result_type` 分发到对应 `*Option`，未知类型回退 JSON；`FileUpload` 选文件后调 `client.upload` 写 `fileId`
+  - 边界鲁棒：`volcanoOption` 空 genes 返空 series 不抛；`useSSE` 非 200 置 `error` 并 reject；`stop()` 调 `reader.cancel()` 中止读取；`ResultChart` 未知 result_type 渲染 `<pre>` JSON 而非崩
+  - 回归保护：mock 全局 `fetch`（`vi.stubGlobal`）返回 fake 流（`vi.fn` 逐步 yield 帧），不真连后端；`ResultChart` mock `ECharts` 组件（echarts `init` 在 jsdom 无 canvas 会失败），断言 series.type 而非真实渲染；`FileUpload` mock `client.upload`；测试不依赖真实 ECharts/DOM 布局
+- **所属系统**：前端（`frontend/src/{charts,hooks,stores,components}`）
+- **阶段**：spec 16-frontend 实现

@@ -234,3 +234,12 @@
   - 功能正确：`send` 把 `conversation_id`（`get().conversationId`）一并 POST 进 `/chat` 请求体；SSE 结束帧后把最后一帧 report 追加为 `messages` 里的 assistant 消息（`{role:'assistant', content: report}`）；`reset` 清空 `messages` 并生成新 `conversationId`（`crypto.randomUUID()`）、`currentState`/`status` 归位
 - **所属系统**：chatStore（`frontend/src/stores/chatStore.ts`）
 - **阶段**：多轮上下文阶段
+
+### multi-turn（多轮上下文）：ChatPanel 从 messages 渲染 + App 新对话按钮
+
+- **新增测试**：
+  - `src/components/ChatPanel.test.tsx` — 改写为无 props（读 store）测试：`messages` 里的 assistant markdown 经 react-markdown 渲染为 heading 与链接 1 条
+- **检查方向**：
+  - 功能正确：`ChatPanel` 无 props（内部 `useChatStore` 读 `messages`/`status`/`send`），assistant 消息走 `ReactMarkdown`（`remarkGfm`）渲染（`# 分析报告` → heading、`[KEGG](https://kegg.jp)` → 链接文本）；App 不再传 `report`/`textSteps`，对话头部新增「新对话」按钮调 `useChatStore.getState().reset()`
+- **所属系统**：ChatPanel（`frontend/src/components/ChatPanel.tsx` / `frontend/src/App.tsx`）
+- **阶段**：多轮上下文阶段

@@ -2,14 +2,8 @@ import { useState, type FormEvent } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { useChatStore } from '../stores/chatStore'
-import type { ExecutedStep } from '../types'
 
-interface Props {
-  report?: string
-  textSteps: ExecutedStep[]
-}
-
-export default function ChatPanel({ report, textSteps }: Props) {
+export default function ChatPanel() {
   const [input, setInput] = useState('')
   const messages = useChatStore((s) => s.messages)
   const status = useChatStore((s) => s.status)
@@ -23,39 +17,27 @@ export default function ChatPanel({ report, textSteps }: Props) {
     void send(text)
   }
 
-  const isEmpty = messages.length === 0 && textSteps.length === 0 && (report == null || report === '')
-
   return (
     <div className="flex flex-col flex-1 min-h-0">
       <div className="flex-1 overflow-y-auto space-y-2 p-4 min-h-0">
         {messages.map((m, i) => (
           <div key={i} className={m.role === 'user' ? 'text-right' : 'text-left'}>
-            <span
+            <div
               className={
                 m.role === 'user'
                   ? 'inline-block rounded-lg px-3 py-2 bg-blue-600 text-white'
-                  : 'inline-block rounded-lg px-3 py-2 bg-gray-100 text-gray-900'
+                  : 'inline-block max-w-full rounded-lg px-3 py-2 bg-gray-100 text-gray-900 text-sm markdown'
               }
             >
-              {m.content}
-            </span>
-          </div>
-        ))}
-        {textSteps.map((s, i) => (
-          <div key={`text-${i}`} className="text-left">
-            <pre className="inline-block max-w-full rounded-lg px-3 py-2 bg-gray-100 text-gray-900 whitespace-pre-wrap text-xs">
-              {JSON.stringify(s.result, null, 2)}
-            </pre>
-          </div>
-        ))}
-        {report != null && report !== '' && (
-          <div className="text-left">
-            <div className="inline-block max-w-full rounded-lg px-3 py-2 bg-gray-100 text-gray-900 text-sm markdown">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>{report}</ReactMarkdown>
+              {m.role === 'user' ? (
+                m.content
+              ) : (
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content}</ReactMarkdown>
+              )}
             </div>
           </div>
-        )}
-        {isEmpty && <p className="text-sm text-gray-400">问点什么，比如：帮我做 DGE 分析</p>}
+        ))}
+        {messages.length === 0 && <p className="text-sm text-gray-400">问点什么，比如：帮我做 DGE 分析</p>}
       </div>
       <form onSubmit={onSubmit} className="p-4 border-t">
         <input

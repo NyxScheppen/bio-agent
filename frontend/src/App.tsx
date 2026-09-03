@@ -28,13 +28,20 @@ export default function App() {
   const steps = currentState?.steps ?? []
   const failed = status === 'error'
   const chartSteps = steps.filter((s) => isChartStep(s, tools))
-  const textSteps = steps.filter((s) => !isChartStep(s, tools))
 
   return (
     <div className="min-h-screen p-4 grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
       <div className="lg:col-span-1 border rounded-lg flex flex-col h-[80vh]">
-        <h2 className="font-semibold p-4 pb-0">对话</h2>
-        <ChatPanel report={currentState?.report} textSteps={textSteps} />
+        <div className="flex items-center justify-between p-4 pb-0">
+          <h2 className="font-semibold">对话</h2>
+          <button
+            onClick={() => useChatStore.getState().reset()}
+            className="text-xs text-gray-500 hover:text-gray-700"
+          >
+            新对话
+          </button>
+        </div>
+        <ChatPanel />
       </div>
       <div className="lg:col-span-1 border rounded-lg">
         <h2 className="font-semibold p-4 pb-0">步骤</h2>

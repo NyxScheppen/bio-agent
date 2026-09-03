@@ -86,6 +86,27 @@ async def fail_task(db: Database, task_id: str, error: str) -> None:
         await db.conn.commit()
 
 
+async def append_message(db: Database, conversation_id: str, role: str, content: str) -> None:
+    """持久化一轮对话消息（user/assistant）；供 /chat 成功落库 + 后续轮次加载历史。"""
+    async with db.lock:
+        await db.conn.execute(
+            "INSERT INTO message (conversation_id, role, content, created_at) VALUES (?, ?, ?, ?)",
+            (conversation_id, role, content, time.time()),
+        )
+        await db.conn.commit()
+
+
+async def list_messages(db: Database, conversation_id: str) -> list[dict[str, str]]:
+    """按时间升序取某对话的全部历史消息，供 /chat 注入 AgentState.history。"""
+    async with db.lock:
+        cursor = await db.conn.execute(
+            "SELECT role, content FROM message WHERE conversation_id = ? ORDER BY created_at ASC, id ASC",
+            (conversation_id,),
+        )
+        rows = await cursor.fetchall()
+    return [{"role": r["role"], "content": r["content"]} for r in rows]
+
+
 # ---- SSE helper ----
 def _sse(data: dict[str, Any]) -> str:
     return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"

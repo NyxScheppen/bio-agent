@@ -197,3 +197,12 @@
   - 回归保护：版本门控测试用追加 v3 验证只套未应用版本
 - **所属系统**：数据库（`backend/bioagent/db.py`）
 - **阶段**：多轮上下文阶段
+
+### multi-turn（多轮上下文）：api message 持久化助手
+
+- **新增测试**：
+  - `tests/test_api/test_api.py` — `test_append_and_list_messages`（功能正确，api 系统，多轮上下文阶段）
+- **检查方向**：
+  - 功能正确：`append_message` 写 `message` 一行（`conversation_id`/`role`/`content`/`created_at`）并 commit；`list_messages` 按 `created_at ASC, id ASC` 只取某 `conversation_id` 的 `role`/`content`，元素形如 `{"role": ..., "content": ...}`；跨对话隔离（conv-2 不入 conv-1）；无历史对话返回 `[]`
+- **所属系统**：API 层（`backend/bioagent/api.py`）
+- **阶段**：多轮上下文阶段

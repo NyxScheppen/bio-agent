@@ -9,9 +9,11 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from bioagent.api import (
+    append_message,
     complete_task,
     create_task,
     fail_task,
+    list_messages,
     router,
     set_task_status,
 )
@@ -136,6 +138,19 @@ async def test_fail_task(db: Database) -> None:
     row = await _get_task(db, "t-4")
     assert row["status"] == "failed"
     assert row["error"] == "boom!"
+
+
+async def test_append_and_list_messages(db: Database) -> None:
+    await append_message(db, "conv-1", "user", "hello")
+    await append_message(db, "conv-1", "assistant", "# report")
+    await append_message(db, "conv-2", "user", "other")
+
+    msgs = await list_messages(db, "conv-1")
+    assert msgs == [
+        {"role": "user", "content": "hello"},
+        {"role": "assistant", "content": "# report"},
+    ]
+    assert await list_messages(db, "conv-3") == []
 
 
 # ---- 端点（集成，裸 FastAPI + 手动 app.state，不跑 lifespan） ----

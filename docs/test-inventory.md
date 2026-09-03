@@ -225,3 +225,12 @@
   - 边界鲁棒：缺省 `conversation_id` 时 `/chat` 生成新 `uuid`，结束帧返回该 id、`list_messages` 返回本轮 user + assistant 两条
 - **所属系统**：API 层（`backend/bioagent/api.py`）
 - **阶段**：多轮上下文阶段
+
+### multi-turn（多轮上下文）：chatStore conversationId + assistant 消息 + reset
+
+- **新增测试**：
+  - `src/stores/chatStore.test.ts` — 改写 `send` 测试（入消息、快照随帧更新、report 后追加 assistant 消息、`conversation_id` 进请求体）1 条、新增 `reset` 测试（清空消息并生成新 conversationId）1 条
+- **检查方向**：
+  - 功能正确：`send` 把 `conversation_id`（`get().conversationId`）一并 POST 进 `/chat` 请求体；SSE 结束帧后把最后一帧 report 追加为 `messages` 里的 assistant 消息（`{role:'assistant', content: report}`）；`reset` 清空 `messages` 并生成新 `conversationId`（`crypto.randomUUID()`）、`currentState`/`status` 归位
+- **所属系统**：chatStore（`frontend/src/stores/chatStore.ts`）
+- **阶段**：多轮上下文阶段

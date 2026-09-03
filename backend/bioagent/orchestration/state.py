@@ -14,3 +14,5 @@ class AgentState(TypedDict, total=False):
     plan: list[dict[str, Any]]  # planner 产出的步骤序列 [{tool, args}]
     steps: list[dict[str, Any]]  # executor 每步结果 [{tool, status, result}]（status="completed"；失败整体上抛，见决策 5）
     report: str                 # reporter 最终报告（markdown，纯文本）
+    conversation_id: str        # 对话 id（10-api 生成/透传，多轮上下文）
+    history: list[dict[str, str]]  # 之前轮次 [{role, content}]，role ∈ {user, assistant}；不含当前 query

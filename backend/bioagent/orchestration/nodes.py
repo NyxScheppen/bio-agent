@@ -4,7 +4,7 @@ import os
 import random
 import re
 from collections.abc import Awaitable, Callable
-from typing import Any
+from typing import Any, cast
 
 from bioagent.db import Database
 from bioagent.enums import Category, Runtime
@@ -21,6 +21,16 @@ Node = Callable[[AgentState], Awaitable[dict[str, Any]]]
 
 def _system(text: str) -> LlmMessage:
     return {"role": "system", "content": text}
+
+
+def _with_history(prompt: str, state: AgentState) -> list[LlmMessage]:
+    """系统 prompt + 之前轮次上下文（user/assistant 交替）；当前 query 已含在 prompt 内。"""
+    history: list[LlmMessage] = []
+    for m in state.get("history", []):
+        role = m.get("role")
+        if role in ("user", "assistant"):
+            history.append(cast(LlmMessage, {"role": role, "content": m["content"]}))
+    return [_system(prompt)] + history
 
 
 def _format_docs(docs: list[dict[str, Any]]) -> str:
@@ -77,7 +87,7 @@ def make_router_node(client: LlmClient) -> Node:
     async def router(state: AgentState) -> dict[str, Any]:
         allowed = [c.value for c in Category]  # 数据驱动，不写死类别列表
         output = await client.complete(
-            [_system(_ROUTER_PROMPT.format(query=state["query"], allowed=json.dumps(allowed)))],
+            _with_history(_ROUTER_PROMPT.format(query=state["query"], allowed=json.dumps(allowed)), state),
             module="router",
             output_type="intent",
             correlation_id=state["correlation_id"],
@@ -104,12 +114,12 @@ def make_planner_node(
         ]
         docs = await rag.query(state["query"])
         output = await client.complete(
-            [_system(_PLANNER_PROMPT.format(
+            _with_history(_PLANNER_PROMPT.format(
                 query=state["query"],
                 intent=state["intent"],
                 tools=json.dumps(tool_descs, ensure_ascii=False),
                 knowledge=_format_docs(docs),
-            ))],
+            ), state),
             module="planner",
             output_type="plan",
             correlation_id=state["correlation_id"],
@@ -172,12 +182,12 @@ def make_reporter_node(
     async def reporter(state: AgentState) -> dict[str, Any]:
         docs = await rag.query(state["query"])
         output = await client.complete(
-            [_system(_REPORTER_PROMPT.format(
+            _with_history(_REPORTER_PROMPT.format(
                 query=state["query"],
                 plan=json.dumps(state["plan"], ensure_ascii=False),
                 steps=json.dumps(state["steps"], ensure_ascii=False),
                 knowledge=_format_docs(docs),
-            ))],
+            ), state),
             module="reporter",
             output_type="report",
             correlation_id=state["correlation_id"],

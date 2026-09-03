@@ -137,6 +137,25 @@ async def test_router_node() -> None:
     assert "哪些基因差异表达？" in prompt
 
 
+async def test_router_node_includes_history() -> None:
+    output = _output('{"intent": "差异表达分析", "categories": ["dge"]}', module="router", output_type="intent")
+    fake = _FakeClient({"router": output})
+    node = make_router_node(cast(LlmClient, fake))
+    state: AgentState = {
+        "query": "把显著性阈值改成 0.01 再跑一次",
+        "correlation_id": "corr-1",
+        "history": [
+            {"role": "user", "content": "做 DGE 分析"},
+            {"role": "assistant", "content": "# DGE 报告"},
+        ],
+    }
+    await node(state)
+    messages = fake.calls[0]["messages"]
+    assert messages[0]["role"] == "system"
+    assert messages[1] == {"role": "user", "content": "做 DGE 分析"}
+    assert messages[2] == {"role": "assistant", "content": "# DGE 报告"}
+
+
 # ---- make_planner_node ----
 
 async def test_planner_node_sample_zero(monkeypatch: pytest.MonkeyPatch) -> None:

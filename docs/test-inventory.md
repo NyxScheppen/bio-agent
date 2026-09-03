@@ -206,3 +206,12 @@
   - 功能正确：`append_message` 写 `message` 一行（`conversation_id`/`role`/`content`/`created_at`）并 commit；`list_messages` 按 `created_at ASC, id ASC` 只取某 `conversation_id` 的 `role`/`content`，元素形如 `{"role": ..., "content": ...}`；跨对话隔离（conv-2 不入 conv-1）；无历史对话返回 `[]`
 - **所属系统**：API 层（`backend/bioagent/api.py`）
 - **阶段**：多轮上下文阶段
+
+### multi-turn（多轮上下文）：state/nodes 注入 history
+
+- **新增测试**：
+  - `tests/test_orchestration/test_orchestration.py` — `test_router_node_includes_history`（功能正确，orchestration 系统，多轮上下文阶段）
+- **检查方向**：
+  - 功能正确：`_with_history` 产出 `[system] + history`（user/assistant 交替、当前 query 含在 prompt 内）；router 带 `history` 时 `messages[1]`/`messages[2]` 为前轮 user/assistant 消息；空 `history` 退化为单条 system（既有节点测试保持绿）
+- **所属系统**：编排（`backend/bioagent/orchestration/state.py` / `nodes.py`）
+- **阶段**：多轮上下文阶段

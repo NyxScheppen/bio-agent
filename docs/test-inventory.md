@@ -243,3 +243,12 @@
   - 功能正确：`ChatPanel` 无 props（内部 `useChatStore` 读 `messages`/`status`/`send`），assistant 消息走 `ReactMarkdown`（`remarkGfm`）渲染（`# 分析报告` → heading、`[KEGG](https://kegg.jp)` → 链接文本）；App 不再传 `report`/`textSteps`，对话头部新增「新对话」按钮调 `useChatStore.getState().reset()`
 - **所属系统**：ChatPanel（`frontend/src/components/ChatPanel.tsx` / `frontend/src/App.tsx`）
 - **阶段**：多轮上下文阶段
+
+### multi-turn（多轮上下文）：taskStore.open 回看回填 messages
+
+- **新增测试**：
+  - `src/stores/taskStore.test.ts` — 改写 `open` 测试（取回任务并把内容回填主视图与对话，追加 `c.messages` 断言）1 条
+- **检查方向**：
+  - 功能正确：`taskStore.open` 取 `TaskDetail` 后把 plan/steps/report 回填 `chatStore.currentState`（复用主视图渲染），并把该任务 `userMessage` + `report` 追加进 `chatStore.messages`（`{role:'user'}` / `{role:'assistant'}`），使回看报告继续显示在对话面板；失败任务仍回填 `status="error"`
+- **所属系统**：taskStore（`frontend/src/stores/taskStore.ts`）
+- **阶段**：多轮上下文阶段

@@ -30,10 +30,17 @@ export const useTaskStore = create<TaskState>((set) => ({
   open: async (id: string): Promise<void> => {
     const detail = await client.getTask(id)
     set({ current: detail })
-    // 回看：把历史任务内容回填主视图（复用 StepList/ResultChart/report 渲染）
-    useChatStore.setState({
+    // 回看：把历史任务内容回填主视图（复用 StepList/ResultChart 渲染），并把 Q&A 追加进对话
+    useChatStore.setState((s) => ({
       currentState: { plan: detail.plan, steps: detail.steps, report: detail.report },
       status: detail.status === 'failed' ? 'error' : 'done',
-    })
+      messages: detail.report
+        ? [
+            ...s.messages,
+            { role: 'user', content: detail.userMessage },
+            { role: 'assistant', content: detail.report },
+          ]
+        : [...s.messages, { role: 'user', content: detail.userMessage }],
+    }))
   },
 }))

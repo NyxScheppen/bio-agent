@@ -15,7 +15,7 @@ describe('taskStore', () => {
     vi.mocked(client.getTask).mockReset()
   })
 
-  it('open 取回任务并把内容回填主视图', async () => {
+  it('open 取回任务并把内容回填主视图与对话', async () => {
     vi.mocked(client.getTask).mockResolvedValue({
       id: 't1',
       userMessage: 'hi',
@@ -34,7 +34,10 @@ describe('taskStore', () => {
     const c = useChatStore.getState()
     expect(c.currentState?.report).toBe('# r')
     expect(c.currentState?.plan).toHaveLength(1)
-    expect(c.currentState?.steps).toHaveLength(1)
+    expect(c.messages).toEqual([
+      { role: 'user', content: 'hi' },
+      { role: 'assistant', content: '# r' },
+    ])
     expect(c.status).toBe('done')
   })
 

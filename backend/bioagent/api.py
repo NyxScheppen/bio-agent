@@ -87,14 +87,26 @@ async def fail_task(db: Database, task_id: str, error: str) -> None:
         await db.conn.commit()
 
 
-async def append_message(db: Database, conversation_id: str, role: str, content: str) -> None:
-    """持久化一轮对话消息（user/assistant）；供 /chat 成功落库 + 后续轮次加载历史。"""
+async def append_turn(
+    db: Database, conversation_id: str, user_content: str, assistant_content: str
+) -> None:
+    """一轮对话 user+assistant 原子写入（单事务），避免中途失败留 dangling user。"""
+    now = time.time()
     async with db.lock:
-        await db.conn.execute(
-            "INSERT INTO message (conversation_id, role, content, created_at) VALUES (?, ?, ?, ?)",
-            (conversation_id, role, content, time.time()),
-        )
-        await db.conn.commit()
+        await db.conn.execute("BEGIN")
+        try:
+            await db.conn.execute(
+                "INSERT INTO message (conversation_id, role, content, created_at) VALUES (?, ?, ?, ?)",
+                (conversation_id, "user", user_content, now),
+            )
+            await db.conn.execute(
+                "INSERT INTO message (conversation_id, role, content, created_at) VALUES (?, ?, ?, ?)",
+                (conversation_id, "assistant", assistant_content, now),
+            )
+            await db.conn.commit()
+        except BaseException:
+            await db.conn.rollback()
+            raise
 
 
 async def list_messages(db: Database, conversation_id: str) -> list[dict[str, str]]:
@@ -136,9 +148,8 @@ async def chat(req: ChatRequest, request: Request) -> StreamingResponse:
                 final = chunk
                 yield _sse(chunk)
             await complete_task(state.db, task_id, final)
-            # 多轮：成功轮次的 Q&A 落 message 表，供后续轮次作为上下文
-            await append_message(state.db, conversation_id, "user", req.message)
-            await append_message(state.db, conversation_id, "assistant", final.get("report", ""))
+            # 多轮：成功轮次的 Q&A 原子落 message 表，供后续轮次作为上下文
+            await append_turn(state.db, conversation_id, req.message, final.get("report", ""))
             yield _sse({"done": True, "task_id": task_id, "conversation_id": conversation_id})
         except Exception as exc:
             log.exception("chat %s failed", task_id)

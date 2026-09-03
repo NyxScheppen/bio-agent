@@ -9,7 +9,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from bioagent.api import (
-    append_message,
+    append_turn,
     complete_task,
     create_task,
     fail_task,
@@ -153,10 +153,9 @@ async def test_fail_task(db: Database) -> None:
     assert row["error"] == "boom!"
 
 
-async def test_append_and_list_messages(db: Database) -> None:
-    await append_message(db, "conv-1", "user", "hello")
-    await append_message(db, "conv-1", "assistant", "# report")
-    await append_message(db, "conv-2", "user", "other")
+async def test_append_turn_and_list_messages(db: Database) -> None:
+    await append_turn(db, "conv-1", "hello", "# report")
+    await append_turn(db, "conv-2", "other", "# other")
 
     msgs = await list_messages(db, "conv-1")
     assert msgs == [
@@ -202,6 +201,13 @@ async def test_chat_stream_failure(db: Database, tmp_path: Path) -> None:
     assert row["status"] == "failed"
     assert row["error"] == "boom"
 
+    # 失败轮次不落 message 表（只持久化成功轮次）
+    async with db.lock:
+        cursor = await db.conn.execute("SELECT COUNT(*) FROM message")
+        row = await cursor.fetchone()
+        assert row is not None
+        assert row[0] == 0
+
 
 async def test_chat_empty_message_422(db: Database, tmp_path: Path) -> None:
     app = _make_app(db, _FakeGraph([]), ToolRegistry(), _cfg(tmp_path))
@@ -211,8 +217,7 @@ async def test_chat_empty_message_422(db: Database, tmp_path: Path) -> None:
 
 
 async def test_chat_persists_conversation_and_injects_history(db: Database, tmp_path: Path) -> None:
-    await append_message(db, "conv-9", "user", "做 DGE")
-    await append_message(db, "conv-9", "assistant", "# 上轮报告")
+    await append_turn(db, "conv-9", "做 DGE", "# 上轮报告")
     full = {"query": "改阈值", "correlation_id": "corr-x", "report": "# r"}
     graph = _CapturingGraph([full])
     app = _make_app(db, graph, ToolRegistry(), _cfg(tmp_path))

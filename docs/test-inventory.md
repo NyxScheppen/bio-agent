@@ -252,3 +252,12 @@
   - 功能正确：`taskStore.open` 取 `TaskDetail` 后把 plan/steps/report 回填 `chatStore.currentState`（复用主视图渲染），并把该任务 `userMessage` + `report` 追加进 `chatStore.messages`（`{role:'user'}` / `{role:'assistant'}`），使回看报告继续显示在对话面板；失败任务仍回填 `status="error"`
 - **所属系统**：taskStore（`frontend/src/stores/taskStore.ts`）
 - **阶段**：多轮上下文阶段
+
+### multi-turn（多轮上下文）：api append_turn 原子写入 + 失败不落库（最终评审修复）
+
+- **新增测试**：
+  - `tests/test_api/test_api.py` — `test_append_turn_and_list_messages`（原 `test_append_and_list_messages` 改名，改测 `append_turn` 原子对写入 + 跨对话隔离）；`test_chat_stream_failure` 追加「失败轮次 message 表 0 行」断言
+- **检查方向**：
+  - 功能正确：一轮 user+assistant 按序返回、跨对话隔离、失败不落库
+- **所属系统**：API 层（`backend/bioagent/api.py`）
+- **阶段**：多轮上下文 —— 最终评审修复

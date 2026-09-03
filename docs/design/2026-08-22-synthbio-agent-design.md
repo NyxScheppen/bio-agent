@@ -160,7 +160,9 @@ State 字段：
 
 ```
 query           # 用户问题（贯穿全链）
-correlation_id  # 关联 ID（= task id，一次会话的唯一标识）
+correlation_id  # 关联 ID（= task id，单次运行标识）
+conversation_id # 对话 id（多轮：一次对话可跨多个 task；区别于 correlation_id）
+history         # 之前轮次 user/assistant 消息 [{role, content}]，拼到各节点 LLM 上下文
 intent          # router 判定的意图（一句话）
 categories      # router 判定的类别（Category.value 列表，管线裁剪依据）
 plan            # planner 生成的顺序步骤序列 [{tool, args}]
@@ -177,7 +179,9 @@ report          # reporter 生成的最终报告（markdown 纯文本）
 
 **管线裁剪**：router 判定 `categories` 后，planner 用 `registry.for_categories(categories)` 只拿到该子集内的工具，避免工具清单随工具总数膨胀。
 
-**可回溯**：一次会话 = 一个 task（`correlation_id`），plan/steps/report 完整落库（03-db 的 task 表），SSE 逐节点推前端。可回溯 = 从 task 表读回任意 task 的完整状态。MVP 不接 LangGraph checkpointer（resume 不在范围，见 spec 09）。
+**可回溯**：一次 task（`correlation_id`）的 plan/steps/report 完整落库（03-db 的 task 表），SSE 逐节点推前端。可回溯 = 从 task 表读回任意 task 的完整状态。MVP 不接 LangGraph checkpointer（resume 不在范围，见 spec 09）。
+
+**多轮上下文**（见 spec 17-multi-turn）：一次 conversation（`conversation_id`）可跨多个 task；`message` 表持久化每轮成功后的 user/assistant，`history` 注入 router/planner/reporter 的 LLM 上下文。
 
 **评测锚点（两个 judge）**：工具调用 judge 评的是 **planner 的 `plan`**（`tool_correct` = planner 选的工具是否合适），不是 executor 的 step 输出——executor 机械执行、不选工具；报告 judge 评 reporter 的 `report`。两 judge 按 `judge_sample_rate` 抽样触发（见 08-eval / spec 09 决策 3）。
 

@@ -63,6 +63,19 @@ _MIGRATIONS: tuple[tuple[int, tuple[str, ...]], ...] = (
             "CREATE INDEX idx_token_usage_corr ON token_usage(correlation_id)",
         ),
     ),
+    (
+        2,
+        (
+            """CREATE TABLE message (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                conversation_id TEXT NOT NULL,  -- 对话 id（uuid4）
+                role TEXT NOT NULL,             -- "user" | "assistant"
+                content TEXT NOT NULL,          -- user 原话 / assistant markdown 报告
+                created_at REAL NOT NULL
+            )""",
+            "CREATE INDEX idx_message_conversation ON message(conversation_id, created_at)",
+        ),
+    ),
 )
 
 

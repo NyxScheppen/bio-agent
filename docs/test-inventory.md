@@ -186,3 +186,14 @@
   - 回归保护：mock 全局 `fetch`（`vi.stubGlobal`）返回 fake 流（`vi.fn` 逐步 yield 帧），不真连后端；`ResultChart` mock `ECharts` 组件（echarts `init` 在 jsdom 无 canvas 会失败），断言 series.type 而非真实渲染；`FileUpload` mock `client.upload`；`taskStore` mock `client.getTask` 返回预设 `TaskDetail`，断言跨 store 回填而非真实 HTTP；测试不依赖真实 ECharts/DOM 布局
 - **所属系统**：前端（`frontend/src/{charts,hooks,stores,components}`）
 - **阶段**：spec 16-frontend 实现
+
+### multi-turn（多轮上下文）：DB 迁移 v2 —— `message` 表
+
+- **新增测试**：
+  - `tests/test_db/test_db.py` — `test_migrate_message_table_columns` 新增；`test_migrate_creates_all_tables_and_indexes` / `test_migrate_idempotent` 期望集合加入 `message` 表与 `idx_message_conversation` 索引；`test_migrate_incremental_gate` 改为追加 v3（真实 `_MIGRATIONS` 已达 v2）；`_table_names` helper 排除 `sqlite_%` 内部表
+- **检查方向**：
+  - 功能正确：v2 迁移建 `message` 表（`AUTOINCREMENT` PK、`conversation_id`/`role`/`content` NOT NULL、`created_at REAL`）与索引 `idx_message_conversation(conversation_id, created_at)`，`schema_version` 最高版本推进到 2
+  - 边界鲁棒：`AUTOINCREMENT` 触发的 SQLite 内部 `sqlite_sequence` 表被 helper 过滤，不混入业务表集合
+  - 回归保护：版本门控测试用追加 v3 验证只套未应用版本
+- **所属系统**：数据库（`backend/bioagent/db.py`）
+- **阶段**：多轮上下文阶段

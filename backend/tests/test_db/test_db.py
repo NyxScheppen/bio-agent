@@ -24,7 +24,10 @@ _MIGRATIONS = db._MIGRATIONS  # pyright: ignore[reportPrivateUsage]
 
 
 async def _table_names(c: aiosqlite.Connection) -> set[str]:
-    cur = await c.execute("SELECT name FROM sqlite_master WHERE type='table'")
+    cur = await c.execute(
+        "SELECT name FROM sqlite_master "
+        "WHERE type='table' AND name NOT LIKE 'sqlite_%'"  # 排除 SQLite 内部表（sqlite_sequence 等）
+    )
     rows = await cur.fetchall()
     return {r["name"] for r in rows}
 
@@ -60,10 +63,23 @@ async def test_migrate_creates_all_tables_and_indexes(conn: aiosqlite.Connection
         "upload",
         "eval_report",
         "token_usage",
+        "message",
         "schema_version",
     }
-    assert await _index_names(conn) == {"idx_task_created_at", "idx_token_usage_corr"}
+    assert await _index_names(conn) == {
+        "idx_task_created_at",
+        "idx_token_usage_corr",
+        "idx_message_conversation",
+    }
     assert await _version(conn) == max(v for v, _ in _MIGRATIONS)
+
+
+async def test_migrate_message_table_columns(conn: aiosqlite.Connection) -> None:
+    await db.migrate(conn)
+    assert "message" in await _table_names(conn)
+    assert await _notnull(conn, "message", "conversation_id") == 1
+    assert await _notnull(conn, "message", "role") == 1
+    assert await _notnull(conn, "message", "content") == 1
 
 
 async def test_migrate_nullability_alignment(conn: aiosqlite.Connection) -> None:
@@ -81,20 +97,20 @@ async def test_migrate_idempotent(conn: aiosqlite.Connection) -> None:
     await db.migrate(conn)
     await db.migrate(conn)
     assert await _version(conn) == max(v for v, _ in _MIGRATIONS)
-    assert len(await _table_names(conn)) == 5
+    assert len(await _table_names(conn)) == 6
 
 
 async def test_migrate_incremental_gate(
     conn: aiosqlite.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    await db.migrate(conn)  # 到 v1
+    await db.migrate(conn)  # 到 v2（真实 _MIGRATIONS 最高版本）
     monkeypatch.setattr(
         db,
         "_MIGRATIONS",
-        _MIGRATIONS + ((2, ("CREATE TABLE foo (id TEXT PRIMARY KEY)",)),),
+        _MIGRATIONS + ((3, ("CREATE TABLE foo (id TEXT PRIMARY KEY)",)),),
     )
-    await db.migrate(conn)  # 只套 v2
-    assert await _version(conn) == 2
+    await db.migrate(conn)  # 只套 v3
+    assert await _version(conn) == 3
     assert "foo" in await _table_names(conn)
     assert "task" in await _table_names(conn)
 

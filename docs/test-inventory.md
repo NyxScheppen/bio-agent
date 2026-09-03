@@ -178,9 +178,10 @@
   - `src/components/ResultChart.test.tsx` — limma_dge→volcano→scatter 分发 1 条、未知 result_type→JSON 不崩 1 条，共 2 条
   - `src/components/FileUpload.test.tsx` — 选文件→upload→fileId 1 条
   - `src/components/StepList.test.tsx` — 失败任务时已完成步骤仍 ✓、未执行步骤 ✗ 1 条
+  - `src/components/ChatPanel.test.tsx` — report（markdown 渲染为 heading）与纯文字步骤结果渲染在对话 1 条
   - `src/stores/taskStore.test.ts` — `open` 取回任务并把 plan/steps/report 回填主视图（`chatStore.currentState`/`status="done"`）1 条、失败任务回填 `status="error"` 1 条，共 2 条
 - **检查方向**：
-  - 功能正确：五种 `*Option` 是纯函数（同输入同输出、含期望 `series.type`、`xAxis`/`yAxis` 等关键字段无 `undefined`）；`useSSE` 的 `run` POST 后按 `\n\n` 切帧、剥 `data: ` 前缀 JSON.parse，done 帧 resolve / error 帧 reject / 否则 `onEvent(快照)`；`chatStore.send` 入用户消息 + 逐帧写 `currentState`、report 出现后 `status="done"`；`taskStore.open` 取 `TaskDetail` 后把 plan/steps/report 回填 `chatStore.currentState`（复用主视图渲染），失败任务回填 `status="error"`；`ResultChart` 按 `tool→result_type` 分发到对应 `*Option`，未知类型回退 JSON；`FileUpload` 选文件后调 `client.upload` 写 `fileId`
+  - 功能正确：五种 `*Option` 是纯函数（同输入同输出、含期望 `series.type`、`xAxis`/`yAxis` 等关键字段无 `undefined`）；`useSSE` 的 `run` POST 后按 `\n\n` 切帧、剥 `data: ` 前缀 JSON.parse，done 帧 resolve / error 帧 reject / 否则 `onEvent(快照)`；`chatStore.send` 入用户消息 + 逐帧写 `currentState`、report 出现后 `status="done"`；`taskStore.open` 取 `TaskDetail` 后把 plan/steps/report 回填 `chatStore.currentState`（复用主视图渲染），失败任务回填 `status="error"`；`ResultChart` 按 `tool→result_type` 分发到对应 `*Option`，未知类型回退 JSON；`ChatPanel` 把 report 经 react-markdown 渲染、纯文字步骤结果渲染为 JSON 气泡（App 按 `result_type` 是否图表分流：图表进「结果」、纯文字进「对话」）；`FileUpload` 选文件后调 `client.upload` 写 `fileId`
   - 边界鲁棒：`volcanoOption` 空 genes 返空 series 不抛、p=0 时 `-log10` clamp 不产生 Infinity；`barplotOption` p=0 时同样 `-log10` clamp 不产生 Infinity；`boxplotOption` 中位数取 `summary.median`（非 floor 下标）、q1/q3 线性插值；`useSSE` 非 200 置 `error` 并 reject、error 帧 `reader.cancel()` 后 reject；`stop()` 调 `reader.cancel()` 中止读取；`ResultChart` 未知 result_type 渲染 `<pre>` JSON 而非崩；`StepList` 失败任务时已完成步骤仍 ✓
   - 回归保护：mock 全局 `fetch`（`vi.stubGlobal`）返回 fake 流（`vi.fn` 逐步 yield 帧），不真连后端；`ResultChart` mock `ECharts` 组件（echarts `init` 在 jsdom 无 canvas 会失败），断言 series.type 而非真实渲染；`FileUpload` mock `client.upload`；`taskStore` mock `client.getTask` 返回预设 `TaskDetail`，断言跨 store 回填而非真实 HTTP；测试不依赖真实 ECharts/DOM 布局
 - **所属系统**：前端（`frontend/src/{charts,hooks,stores,components}`）

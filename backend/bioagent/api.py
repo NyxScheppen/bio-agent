@@ -23,6 +23,7 @@ _ALLOWED_SUFFIXES = {".csv", ".tsv", ".txt"}
 # ---- 请求 / 响应模型 ----
 class ChatRequest(BaseModel):
     message: str = Field(min_length=1)
+    conversation_id: str | None = None  # 多轮：续接某对话；缺省新建一个
 
 
 class TaskSummary(BaseModel):
@@ -117,18 +118,28 @@ def _sse(data: dict[str, Any]) -> str:
 async def chat(req: ChatRequest, request: Request) -> StreamingResponse:
     state = request.app.state
     task_id = str(uuid.uuid4())
+    conversation_id = req.conversation_id or str(uuid.uuid4())
+    history = await list_messages(state.db, conversation_id)  # 之前轮次（不含当前 query）
     await create_task(state.db, task_id, req.message)  # 建 task 失败 = 正常 500
 
     async def stream():
         await set_task_status(state.db, task_id, TaskStatus.RUNNING)
-        initial: dict[str, Any] = {"query": req.message, "correlation_id": task_id}
+        initial: dict[str, Any] = {
+            "query": req.message,
+            "correlation_id": task_id,
+            "conversation_id": conversation_id,
+            "history": history,
+        }
         final: dict[str, Any] = initial
         try:
             async for chunk in state.graph.astream(initial, stream_mode="values"):
                 final = chunk
                 yield _sse(chunk)
             await complete_task(state.db, task_id, final)
-            yield _sse({"done": True, "task_id": task_id})
+            # 多轮：成功轮次的 Q&A 落 message 表，供后续轮次作为上下文
+            await append_message(state.db, conversation_id, "user", req.message)
+            await append_message(state.db, conversation_id, "assistant", final.get("report", ""))
+            yield _sse({"done": True, "task_id": task_id, "conversation_id": conversation_id})
         except Exception as exc:
             log.exception("chat %s failed", task_id)
             await fail_task(state.db, task_id, str(exc))

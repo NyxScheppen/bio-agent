@@ -71,6 +71,19 @@ class _FakeGraph:
             raise RuntimeError(self._error)
 
 
+class _CapturingGraph(_FakeGraph):
+    def __init__(self, states: list[dict[str, Any]]) -> None:
+        super().__init__(states)
+        self.initial: dict[str, Any] = {}
+
+    async def astream(
+        self, initial: dict[str, Any], stream_mode: str = "values"
+    ) -> AsyncIterator[dict[str, Any]]:
+        self.initial = initial
+        for s in self._states:
+            yield s
+
+
 def _make_app(db: Database, graph: Any, registry: ToolRegistry, cfg: Config) -> FastAPI:
     app = FastAPI()
     app.include_router(router)
@@ -195,6 +208,49 @@ async def test_chat_empty_message_422(db: Database, tmp_path: Path) -> None:
     client = TestClient(app)
     resp = client.post("/chat", json={"message": ""})
     assert resp.status_code == 422
+
+
+async def test_chat_persists_conversation_and_injects_history(db: Database, tmp_path: Path) -> None:
+    await append_message(db, "conv-9", "user", "做 DGE")
+    await append_message(db, "conv-9", "assistant", "# 上轮报告")
+    full = {"query": "改阈值", "correlation_id": "corr-x", "report": "# r"}
+    graph = _CapturingGraph([full])
+    app = _make_app(db, graph, ToolRegistry(), _cfg(tmp_path))
+    client = TestClient(app)
+
+    resp = client.post("/chat", json={"message": "改阈值", "conversation_id": "conv-9"})
+    events = _sse_events(resp.text)
+
+    assert resp.status_code == 200
+    assert events[-1]["done"] is True
+    assert events[-1]["conversation_id"] == "conv-9"
+    assert graph.initial["history"] == [
+        {"role": "user", "content": "做 DGE"},
+        {"role": "assistant", "content": "# 上轮报告"},
+    ]
+    assert await list_messages(db, "conv-9") == [
+        {"role": "user", "content": "做 DGE"},
+        {"role": "assistant", "content": "# 上轮报告"},
+        {"role": "user", "content": "改阈值"},
+        {"role": "assistant", "content": "# r"},
+    ]
+
+
+async def test_chat_generates_new_conversation_when_absent(db: Database, tmp_path: Path) -> None:
+    full = {"query": "q", "correlation_id": "c", "report": "# r"}
+    app = _make_app(db, _FakeGraph([full]), ToolRegistry(), _cfg(tmp_path))
+    client = TestClient(app)
+
+    resp = client.post("/chat", json={"message": "q"})
+    events = _sse_events(resp.text)
+
+    assert resp.status_code == 200
+    conv_id = events[-1]["conversation_id"]
+    assert conv_id  # 非空
+    assert await list_messages(db, conv_id) == [
+        {"role": "user", "content": "q"},
+        {"role": "assistant", "content": "# r"},
+    ]
 
 
 async def test_list_tasks_desc(db: Database, tmp_path: Path) -> None:

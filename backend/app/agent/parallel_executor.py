@@ -12,18 +12,71 @@
 """
 
 import concurrent.futures
-import json
-import time
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
+from app.agent.agent_utils import to_plain_dict
+from app.agent.agent_constants import FEATURE_FLAGS
 from app.agent.tool_registry import TOOL_REGISTRY
-from app.agent.tool_result import ToolResult
+from app.agent.tool_result import make_error_result
 from app.agent.tool_runner import run_tool_with_lifecycle
+
+
+def _normalize_dependencies(
+    steps: List[Dict[str, Any]],
+    dependencies: Optional[Dict[Any, List[Any]]] = None,
+) -> Dict[int, List[int]]:
+    """校验并归一化 Planner 的依赖声明。"""
+    id_to_step: Dict[int, Dict[str, Any]] = {}
+    for step in steps:
+        raw_step_id = step.get("step_id")
+        if raw_step_id is None:
+            raise ValueError("步骤缺少 step_id")
+        try:
+            step_id = int(raw_step_id)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"无效 step_id: {raw_step_id!r}") from exc
+        if step_id in id_to_step:
+            raise ValueError(f"重复 step_id: {step_id}")
+        id_to_step[step_id] = step
+
+    normalized: Dict[int, List[int]] = {step_id: [] for step_id in id_to_step}
+    declarations: Dict[Any, Any] = dict(dependencies or {})
+    for step_id, step in id_to_step.items():
+        if "depends_on" in step and step_id not in declarations and str(step_id) not in declarations:
+            declarations[step_id] = step.get("depends_on", [])
+
+    for raw_step_id, raw_prerequisites in declarations.items():
+        try:
+            step_id = int(raw_step_id)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"无效依赖键: {raw_step_id!r}") from exc
+        if step_id not in id_to_step:
+            raise ValueError(f"依赖声明引用未知步骤: {step_id}")
+        if not isinstance(raw_prerequisites, list):
+            raise ValueError(f"步骤 {step_id} 的依赖必须是列表")
+
+        prerequisites: List[int] = []
+        for raw_prerequisite in raw_prerequisites:
+            try:
+                prerequisite = int(raw_prerequisite)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    f"步骤 {step_id} 包含无效依赖: {raw_prerequisite!r}"
+                ) from exc
+            if prerequisite not in id_to_step:
+                raise ValueError(f"步骤 {step_id} 依赖未知步骤 {prerequisite}")
+            if prerequisite == step_id:
+                raise ValueError(f"步骤 {step_id} 不能依赖自身")
+            if prerequisite not in prerequisites:
+                prerequisites.append(prerequisite)
+        normalized[step_id] = prerequisites
+
+    return normalized
 
 
 def _topological_batches(
     steps: List[Dict[str, Any]],
-    dependencies: Optional[Dict[int, List[int]]] = None,
+    dependencies: Optional[Dict[Any, List[Any]]] = None,
 ) -> List[List[Dict[str, Any]]]:
     """
     将步骤按依赖关系分组为可并行执行的批次。
@@ -37,36 +90,19 @@ def _topological_batches(
     Returns:
         [[batch1_steps], [batch2_steps], ...] 拓扑排序后的批次
     """
-    if not dependencies:
-        # 无依赖声明 → 全部串行（保守默认）
-        return [[s] for s in steps]
+    if not steps:
+        return []
 
-    # 构建 step_id 到索引的映射
-    id_to_step = {}
-    for s in steps:
-        sid = s.get("step_id")
-        if sid is not None:
-            id_to_step[int(sid)] = s
+    normalized = _normalize_dependencies(steps, dependencies)
+    if not any(normalized.values()):
+        return [[step] for step in steps]
 
-    # 构建入度表
-    in_degree: Dict[int, int] = {}
-    depends_on: Dict[int, List[int]] = {}
-
-    for s in steps:
-        sid = int(s.get("step_id", 0))
-        in_degree[sid] = 0
-        depends_on[sid] = []
-
-    for sid, prereqs in (dependencies or {}).items():
-        sid = int(sid)
-        if sid not in in_degree:
-            in_degree[sid] = 0
-        in_degree[sid] += len(prereqs)
-        for prereq in prereqs:
-            prereq = int(prereq)
-            if prereq not in depends_on:
-                depends_on[prereq] = []
-            depends_on[prereq].append(sid)
+    id_to_step = {int(step["step_id"]): step for step in steps}
+    in_degree = {step_id: len(prerequisites) for step_id, prerequisites in normalized.items()}
+    dependents: Dict[int, List[int]] = {step_id: [] for step_id in id_to_step}
+    for step_id, prerequisites in normalized.items():
+        for prerequisite in prerequisites:
+            dependents[prerequisite].append(step_id)
 
     # Kahn 算法
     queue = [sid for sid, deg in in_degree.items() if deg == 0]
@@ -85,7 +121,7 @@ def _topological_batches(
                 batch.append(step)
             processed.add(sid)
 
-            for dependent in depends_on.get(sid, []):
+            for dependent in dependents.get(sid, []):
                 in_degree[dependent] -= 1
                 if in_degree[dependent] == 0:
                     next_queue.append(dependent)
@@ -94,13 +130,67 @@ def _topological_batches(
             batches.append(batch)
         queue = next_queue
 
-    # 兜底：未处理的步骤逐个串行
-    for s in steps:
-        sid = int(s.get("step_id", 0))
-        if sid not in processed:
-            batches.append([s])
+    if len(processed) != len(steps):
+        unresolved = sorted(set(id_to_step) - processed)
+        raise ValueError(f"检测到循环依赖: {unresolved}")
 
-    return batches if batches else [[s] for s in steps]
+    return batches
+
+
+def _build_execution_batches(
+    steps: List[Dict[str, Any]],
+    dependencies: Optional[Dict[Any, List[Any]]] = None,
+    parallel_groups: Optional[List[List[Any]]] = None,
+) -> List[List[Dict[str, Any]]]:
+    """结合依赖拓扑和 Planner 并行白名单生成执行批次。"""
+    normalized_dependencies = _normalize_dependencies(steps, dependencies)
+    if any(normalized_dependencies.values()):
+        base_batches = _topological_batches(steps, normalized_dependencies)
+    elif parallel_groups:
+        base_batches = [list(steps)]
+    else:
+        return [[step] for step in steps]
+
+    if not parallel_groups:
+        return base_batches
+    if not isinstance(parallel_groups, list):
+        raise ValueError("parallel_groups 必须是列表")
+
+    known_ids = {int(step["step_id"]) for step in steps}
+    normalized_groups: List[List[int]] = []
+    grouped_ids: Set[int] = set()
+    for raw_group in parallel_groups:
+        if not isinstance(raw_group, list):
+            raise ValueError("parallel_groups 中的每一项必须是 step_id 列表")
+        group: List[int] = []
+        for raw_step_id in raw_group:
+            try:
+                step_id = int(raw_step_id)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"无效并行 step_id: {raw_step_id!r}") from exc
+            if step_id not in known_ids:
+                raise ValueError(f"并行组引用未知步骤: {step_id}")
+            if step_id in grouped_ids:
+                raise ValueError(f"步骤 {step_id} 出现在多个并行组")
+            grouped_ids.add(step_id)
+            group.append(step_id)
+        if group:
+            normalized_groups.append(group)
+
+    batches: List[List[Dict[str, Any]]] = []
+    for base_batch in base_batches:
+        step_by_id = {int(step["step_id"]): step for step in base_batch}
+        assigned: Set[int] = set()
+        for group in normalized_groups:
+            selected = [step_by_id[step_id] for step_id in group if step_id in step_by_id]
+            if selected:
+                batches.append(selected)
+                assigned.update(int(step["step_id"]) for step in selected)
+        for step in base_batch:
+            if int(step["step_id"]) not in assigned:
+                batches.append([step])
+
+    return batches
 
 
 def _resolve_tool_for_step(
@@ -129,6 +219,7 @@ def execute_parallel_steps(
     session_id: str,
     progress_callback: Optional[Callable] = None,
     max_workers: int = 4,
+    dependencies: Optional[Dict[Any, List[Any]]] = None,
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
     """
     按批次并行执行步骤。
@@ -146,6 +237,10 @@ def execute_parallel_steps(
     all_observations: List[Dict[str, Any]] = []
     all_output_files: List[Dict[str, Any]] = []
     step_results: Dict[int, Any] = {}  # step_id → result，供后续步骤引用
+    normalized_dependencies = _normalize_dependencies(
+        [step for batch in batches for step in batch],
+        dependencies,
+    )
 
     total_batches = len(batches)
 
@@ -153,58 +248,83 @@ def execute_parallel_steps(
         if progress_callback:
             progress_callback(batch_idx + 1, total_batches, None, "running")
 
+        runnable: List[Dict[str, Any]] = []
+        for step in batch:
+            step_id = int(step["step_id"])
+            prerequisites = normalized_dependencies.get(step_id, [])
+            failed_dependencies = [
+                prerequisite
+                for prerequisite in prerequisites
+                if prerequisite not in step_results
+                or step_results[prerequisite].get("status") != "success"
+            ]
+            if failed_dependencies:
+                observation = {
+                    "tool": _step_tool_name(step),
+                    "args": dict(step.get("parameters", {}) or {}),
+                    "result_summary": f"依赖步骤失败，跳过步骤 {step_id}",
+                    "output_files": [],
+                    "status": "blocked",
+                    "errors": [f"failed_dependencies: {failed_dependencies}"],
+                    "step_id": step_id,
+                }
+                all_observations.append(observation)
+                step_results[step_id] = observation
+            else:
+                runnable.append(step)
+
         # 串行批（单步骤）→ 直接执行
-        if len(batch) == 1:
+        if len(runnable) == 1:
             obs, files = _execute_single_step(
-                batch[0], available_tool_names, session_id, step_results
+                runnable[0], available_tool_names, session_id, step_results
             )
             all_observations.extend(obs)
             all_output_files.extend(files)
             if obs:
-                step_results[int(batch[0].get("step_id", 0))] = obs[-1]
-            continue
+                step_results[int(runnable[0]["step_id"])] = obs[-1]
 
         # 并行批 → ThreadPoolExecutor
-        with concurrent.futures.ThreadPoolExecutor(
-            max_workers=min(max_workers, len(batch))
-        ) as executor:
-            futures = {}
-            for step in batch:
-                future = executor.submit(
-                    _execute_single_step,
-                    step,
-                    available_tool_names,
-                    session_id,
-                    step_results,
-                )
-                futures[future] = step
+        elif len(runnable) > 1:
+            with concurrent.futures.ThreadPoolExecutor(
+                max_workers=max(1, min(max_workers, len(runnable)))
+            ) as executor:
+                futures = {}
+                previous_results = dict(step_results)
+                for step in runnable:
+                    future = executor.submit(
+                        _execute_single_step,
+                        step,
+                        available_tool_names,
+                        session_id,
+                        previous_results,
+                    )
+                    futures[future] = step
 
-            for future in concurrent.futures.as_completed(futures):
-                step = futures[future]
-                try:
-                    obs, files = future.result(timeout=600)
+                completed: Dict[int, Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]] = {}
+                for future in concurrent.futures.as_completed(futures):
+                    step = futures[future]
+                    step_id = int(step["step_id"])
+                    try:
+                        completed[step_id] = future.result()
+                    except Exception as exc:
+                        completed[step_id] = ([{
+                            "tool": _step_tool_name(step),
+                            "args": dict(step.get("parameters", {}) or {}),
+                            "result_summary": f"并行步骤执行异常: {exc}",
+                            "output_files": [],
+                            "status": "error",
+                            "errors": [str(exc)],
+                            "step_id": step_id,
+                        }], [])
+
+                # 并发完成顺序不稳定，对外按 Planner 顺序输出。
+                for step in runnable:
+                    step_id = int(step["step_id"])
+                    obs, files = completed[step_id]
                     all_observations.extend(obs)
                     all_output_files.extend(files)
                     if obs:
-                        step_results[int(step.get("step_id", 0))] = obs[-1]
-                except concurrent.futures.TimeoutError:
-                    all_observations.append({
-                        "tool": step.get("preferred_tools", ["unknown"])[0],
-                        "args": {},
-                        "result_summary": "并行步骤执行超时",
-                        "output_files": [],
-                        "status": "error",
-                        "errors": ["timeout"],
-                    })
-                except Exception as e:
-                    all_observations.append({
-                        "tool": step.get("preferred_tools", ["unknown"])[0],
-                        "args": {},
-                        "result_summary": f"并行步骤执行异常: {e}",
-                        "output_files": [],
-                        "status": "error",
-                        "errors": [str(e)],
-                    })
+                        step_results[step_id] = obs[-1]
 
         if progress_callback:
             progress_callback(batch_idx + 1, total_batches, None, "done")
@@ -212,11 +332,19 @@ def execute_parallel_steps(
     return all_observations, all_output_files
 
 
+def _step_tool_name(step: Dict[str, Any]) -> str:
+    direct_tool = str(step.get("tool", "") or "")
+    if direct_tool:
+        return direct_tool
+    preferred = step.get("preferred_tools", []) or []
+    return str(preferred[0]) if preferred else "unknown"
+
+
 def _execute_single_step(
     step: Dict[str, Any],
     available_tool_names: Set[str],
     session_id: str,
-    previous_results: Dict[int, Any] = None,
+    previous_results: Optional[Dict[int, Any]] = None,
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
     """
     执行单个 Planner 步骤。
@@ -245,23 +373,84 @@ def _execute_single_step(
             "errors": ["tool_not_registered"],
         }], [])
 
-    # 构建参数 — 从 step.parameter_strategy 或默认空参数
-    params = step.get("parameters", {}) or {}
-    # 注入上一步骤的结果引用（如果参数中有 $step_N 引用）
-    if previous_results:
-        params = _resolve_step_references(params, previous_results)
+    raw_params = step.get("parameters")
+    if not isinstance(raw_params, dict):
+        return ([{
+            "tool": tool_name,
+            "args": {},
+            "result_summary": "并行步骤缺少结构化 parameters",
+            "output_files": [],
+            "status": "error",
+            "errors": ["invalid_parameters"],
+            "step_id": step.get("step_id"),
+        }], [])
 
     try:
-        result: ToolResult = run_tool_with_lifecycle(
-            tool_name=tool_name,
-            func=func,
-            function_args=params,
-            session_id=session_id,
-        )
+        params = _resolve_step_references(dict(raw_params), previous_results or {})
+    except ValueError as exc:
+        return ([{
+            "tool": tool_name,
+            "args": dict(raw_params),
+            "result_summary": str(exc),
+            "output_files": [],
+            "status": "blocked",
+            "errors": ["unresolved_step_reference"],
+            "step_id": step.get("step_id"),
+        }], [])
+
+    try:
+        actual_tool_name = tool_name
+        race_metadata: Dict[str, Any] = {}
+        result: Any
+        if FEATURE_FLAGS.get("waterfall_racing", False):
+            from app.agent.racing_executor import (
+                get_compatible_racing_candidates,
+                race_tools,
+            )
+
+            candidates = get_compatible_racing_candidates(
+                tool_name,
+                available_tool_names,
+                params,
+            )
+            if len(candidates) >= 2:
+                race_result = race_tools(candidates, params, session_id=session_id)
+                result = race_result.winner or race_result.fallback_result
+                actual_tool_name = (
+                    race_result.winner_tool_name
+                    or race_result.fallback_tool_name
+                    or tool_name
+                )
+                race_metadata = {
+                    "requested_tool": tool_name,
+                    "racing_candidates": candidates,
+                    "racing_losers": race_result.losers,
+                    "racing_runtime_seconds": race_result.total_runtime,
+                }
+            else:
+                result = run_tool_with_lifecycle(
+                    tool_name=tool_name,
+                    func=func,
+                    function_args=params,
+                    session_id=session_id,
+                )
+        else:
+            result = run_tool_with_lifecycle(
+                tool_name=tool_name,
+                func=func,
+                function_args=params,
+                session_id=session_id,
+            )
+
+        if result is None:
+            result = make_error_result(
+                message="竞速执行未返回结果",
+                errors=["race_no_result"],
+            )
 
         output_files = _extract_files_from_result(result)
         observation = {
-            "tool": tool_name,
+            "tool": actual_tool_name,
             "args": params,
             "result_summary": result.message or "",
             "output_files": output_files,
@@ -271,6 +460,7 @@ def _execute_single_step(
             "job_id": result.provenance.job_id,
             "job_dir": result.summary.get("job_dir", ""),
             "step_id": step.get("step_id"),
+            **race_metadata,
         }
 
         return ([observation], output_files)
@@ -288,27 +478,41 @@ def _execute_single_step(
 
 
 def _resolve_step_references(
-    params: Dict[str, Any],
+    params: Any,
     previous_results: Dict[int, Any],
-) -> Dict[str, Any]:
+) -> Any:
     """解析参数中的 $step_N 引用为实际值。"""
-    resolved = {}
-    for key, value in params.items():
-        if isinstance(value, str) and value.startswith("$step_"):
-            try:
-                step_id = int(value.replace("$step_", ""))
-                ref = previous_results.get(step_id, {})
-                # 尝试取 output_files 中第一个文件的 relative_path
-                files = ref.get("output_files", [])
-                if files:
-                    resolved[key] = files[0].get("relative_path", value)
-                else:
-                    resolved[key] = ref.get("result_summary", value)
-            except (ValueError, AttributeError):
-                resolved[key] = value
-        else:
-            resolved[key] = value
-    return resolved
+    if isinstance(params, dict):
+        return {
+            key: _resolve_step_references(value, previous_results)
+            for key, value in params.items()
+        }
+    if isinstance(params, list):
+        return [_resolve_step_references(value, previous_results) for value in params]
+    if not isinstance(params, str) or not params.startswith("$step_"):
+        return params
+
+    try:
+        step_id = int(params[len("$step_"):])
+    except ValueError as exc:
+        raise ValueError(f"无效步骤引用: {params}") from exc
+
+    reference = previous_results.get(step_id)
+    if not isinstance(reference, dict):
+        raise ValueError(f"步骤引用尚不可用: {params}")
+    if reference.get("status") != "success":
+        raise ValueError(f"步骤引用未成功: {params}")
+
+    files = reference.get("output_files", []) or []
+    if files:
+        first_file = files[0]
+        resolved_path = first_file.get("relative_path") or first_file.get("url")
+        if resolved_path:
+            return resolved_path
+    summary = reference.get("result_summary")
+    if summary:
+        return summary
+    raise ValueError(f"步骤引用没有可传递结果: {params}")
 
 
 def _extract_files_from_result(result: Any) -> List[Dict[str, Any]]:
@@ -316,10 +520,9 @@ def _extract_files_from_result(result: Any) -> List[Dict[str, Any]]:
     files = []
     if hasattr(result, "output_files"):
         for f in (result.output_files or []):
-            if hasattr(f, "model_dump"):
-                files.append(f.model_dump())
-            elif isinstance(f, dict):
-                files.append(f)
+            d = to_plain_dict(f)
+            if d is not None:
+                files.append(d)
     elif isinstance(result, dict):
         ofs = result.get("output_files", [])
         for f in (ofs or []):

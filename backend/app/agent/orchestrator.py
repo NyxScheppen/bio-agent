@@ -21,6 +21,7 @@ from app.agent.sub_agent_manager import (
     SubAgentResult,
     sub_agent_manager,
 )
+from app.agent.agent_utils import to_plain_dict
 
 
 class TaskStatus(str, Enum):
@@ -39,8 +40,8 @@ class KanbanTask:
         task_id: str,
         name: str,
         tool: str,
-        args: Dict[str, Any] = None,
-        depends_on: List[str] = None,
+        args: Optional[Dict[str, Any]] = None,
+        depends_on: Optional[List[str]] = None,
     ):
         self.task_id = task_id
         self.name = name
@@ -57,10 +58,10 @@ class KanbanTask:
             return False
         return all(dep in completed_ids for dep in self.depends_on)
 
-    def mark_blocked(self):
+    def mark_blocked(self, reason: str = "依赖任务失败") -> None:
         """标记为阻塞（依赖任务失败）。"""
         self.status = TaskStatus.BLOCKED
-        self.error = "依赖任务失败"
+        self.error = reason
 
 
 class Orchestrator:
@@ -80,7 +81,7 @@ class Orchestrator:
         results = orch.run_all()
     """
 
-    def __init__(self, manager: SubAgentManager = None):
+    def __init__(self, manager: Optional[SubAgentManager] = None):
         self.tasks: Dict[str, KanbanTask] = {}
         self._manager = manager or sub_agent_manager
 
@@ -89,8 +90,8 @@ class Orchestrator:
         task_id: str,
         name: str,
         tool: str,
-        args: Dict[str, Any] = None,
-        depends_on: List[str] = None,
+        args: Optional[Dict[str, Any]] = None,
+        depends_on: Optional[List[str]] = None,
     ) -> "Orchestrator":
         """添加一个任务到 Kanban 板。"""
         self.tasks[task_id] = KanbanTask(
@@ -105,18 +106,24 @@ class Orchestrator:
     def add_tasks_from_planner(
         self,
         steps: List[Dict[str, Any]],
-        step_dependencies: Dict[int, List[int]] = None,
+        step_dependencies: Optional[Dict[Any, List[Any]]] = None,
     ) -> "Orchestrator":
         """从 Planner 步骤自动添加任务。"""
         for s in steps:
             sid = str(s.get("step_id", ""))
             tools = s.get("preferred_tools", [])
-            deps = step_dependencies.get(int(s.get("step_id", 0)), []) if step_dependencies else []
+            deps: List[Any] = []
+            if step_dependencies:
+                numeric_id = int(s.get("step_id", 0))
+                deps = step_dependencies.get(
+                    numeric_id,
+                    step_dependencies.get(str(numeric_id), []),
+                )
             self.add_task(
                 task_id=sid,
                 name=s.get("goal", ""),
                 tool=tools[0] if tools else "",
-                args={},
+                args=dict(s.get("parameters", {}) or {}),
                 depends_on=[str(d) for d in deps],
             )
         return self
@@ -135,23 +142,37 @@ class Orchestrator:
         """
         completed_ids: set = set()
         failed_ids: set = set()
+        blocked_ids: set = set()
 
-        max_iterations = len(self.tasks) * 2  # 安全上限
+        max_iterations = max(1, len(self.tasks) * 2)
         iteration = 0
 
-        while len(completed_ids) + len(failed_ids) < len(self.tasks) and iteration < max_iterations:
+        while (
+            len(completed_ids) + len(failed_ids) + len(blocked_ids) < len(self.tasks)
+            and iteration < max_iterations
+        ):
             iteration += 1
 
             # 找可启动的任务
             ready = []
             for tid, task in self.tasks.items():
                 if task.status == TaskStatus.TODO:
+                    unknown_dependencies = [
+                        dep for dep in task.depends_on if dep not in self.tasks
+                    ]
+                    if unknown_dependencies:
+                        task.mark_blocked(f"未知依赖: {unknown_dependencies}")
+                        blocked_ids.add(tid)
+                        continue
+
                     # 检查是否有依赖失败
                     has_failed_dep = any(
-                        dep in failed_ids for dep in task.depends_on
+                        dep in failed_ids or dep in blocked_ids
+                        for dep in task.depends_on
                     )
                     if has_failed_dep:
-                        task.mark_blocked()
+                        task.mark_blocked("依赖任务失败")
+                        blocked_ids.add(tid)
                         continue
 
                     if task.can_start(completed_ids):
@@ -164,13 +185,9 @@ class Orchestrator:
                     if t.status == TaskStatus.TODO
                 ]
                 if remaining_todo:
-                    # 尝试强制执行无工具依赖的任务
                     for task in remaining_todo:
-                        if not task.tool:
-                            task.status = TaskStatus.DONE
-                            completed_ids.add(task.task_id)
-                        else:
-                            task.mark_blocked()
+                        task.mark_blocked("循环或不可解析依赖")
+                        blocked_ids.add(task.task_id)
                 break
 
             # 构建 SubAgentTask 列表
@@ -180,7 +197,7 @@ class Orchestrator:
                 sub_tasks.append(SubAgentTask(
                     goal=task.name,
                     tool=task.tool,
-                    args=task.args,
+                    args=self._resolve_task_references(task.args),
                 ))
                 task_id_map[i] = task.task_id
                 task.status = TaskStatus.IN_PROGRESS
@@ -204,6 +221,10 @@ class Orchestrator:
                     failed_ids.add(tid)
                     task.error = result.message
 
+        for task in self.tasks.values():
+            if task.status == TaskStatus.TODO:
+                task.mark_blocked("达到调度迭代上限")
+
         # 汇总
         completed = [t for t in self.tasks.values() if t.status == TaskStatus.DONE]
         failed = [t for t in self.tasks.values() if t.status == TaskStatus.FAILED]
@@ -214,6 +235,11 @@ class Orchestrator:
                 {
                     "task_id": t.task_id,
                     "name": t.name,
+                    "tool": t.tool,
+                    "args": t.args,
+                    "message": t.result.message if t.result else "",
+                    "runtime_seconds": t.result.runtime_seconds if t.result else 0.0,
+                    "attempts": t.result.attempts if t.result else 0,
                     "files": t.result.output_files if t.result else [],
                 }
                 for t in completed
@@ -222,6 +248,8 @@ class Orchestrator:
                 {
                     "task_id": t.task_id,
                     "name": t.name,
+                    "tool": t.tool,
+                    "args": t.args,
                     "error": t.error or "未知错误",
                 }
                 for t in failed
@@ -230,6 +258,8 @@ class Orchestrator:
                 {
                     "task_id": t.task_id,
                     "name": t.name,
+                    "tool": t.tool,
+                    "args": t.args,
                     "reason": t.error or "依赖未满足",
                 }
                 for t in blocked
@@ -239,6 +269,30 @@ class Orchestrator:
             + (f"，{len(blocked)} 阻塞" if blocked else ""),
             "all_output_files": _collect_all_files(completed),
         }
+
+    def _resolve_task_references(self, value: Any) -> Any:
+        """解析参数中指向已完成任务的精确 ``$step_ID`` 引用。"""
+        if isinstance(value, dict):
+            return {
+                key: self._resolve_task_references(item)
+                for key, item in value.items()
+            }
+        if isinstance(value, list):
+            return [self._resolve_task_references(item) for item in value]
+        if not isinstance(value, str) or not value.startswith("$step_"):
+            return value
+
+        task_id = value[len("$step_"):]
+        dependency = self.tasks.get(task_id)
+        if not dependency or not dependency.result:
+            return value
+
+        result = to_plain_dict(dependency.result) or {}
+        files = result.get("output_files", []) or []
+        if files:
+            first_file = files[0]
+            return first_file.get("relative_path") or first_file.get("url") or value
+        return result.get("message") or value
 
 
 def _collect_all_files(completed_tasks: List[KanbanTask]) -> List[Dict[str, Any]]:

@@ -1,3 +1,4 @@
+import asyncio
 import json
 from typing import Any, Dict, List, Optional
 
@@ -14,8 +15,11 @@ from app.agent.router_agent import run_router_agent
 from app.agent.planner_agent import run_planner_agent
 from app.agent.executor_agent import run_executor_agent
 from app.agent.reporter_agent import run_reporter_agent
+from app.agent.delegator_agent import run_delegator_agent
+from app.agent.orchestrator import Orchestrator
 from app.agent.category_router import resolve_tool_categories
 from app.agent.task_prompts import REPORTER_PROMPT, build_domain_prompt
+from app.agent.agent_constants import FEATURE_FLAGS
 
 # Skill system
 from app.agent.skills.skill_models import SkillSpec
@@ -75,7 +79,66 @@ def _make_agent_result(answer: str, files: List[Dict[str, Any]] | None = None) -
         "files": _dedupe_files(files or []),
     }
 
-async def run_bio_agent(history_messages: list, session_id: str = None) -> Dict[str, Any]:
+
+def _normalize_execution_mode(value: Any) -> str:
+    """统一历史 Router/Planner 的执行模式命名。"""
+    mode = str(value or "").strip().lower()
+    if mode == "direct_answer":
+        return "answer_only"
+    if mode in {"answer_only", "tool_execution", "ask_user"}:
+        return mode
+    return "tool_execution"
+
+
+def _run_delegated_tasks(
+    sub_tasks: List[Dict[str, Any]],
+    session_id: str,
+) -> Dict[str, Any]:
+    """将 Delegator 输出交给 Orchestrator 执行并转换为 Executor 协议。"""
+    orchestrator = Orchestrator()
+    for index, task in enumerate(sub_tasks):
+        dependencies = [str(dep) for dep in task.get("depends_on", [])]
+        orchestrator.add_task(
+            task_id=str(index),
+            name=str(task.get("goal", "")),
+            tool=str(task.get("tool", "")),
+            args=dict(task.get("args", {}) or {}),
+            depends_on=dependencies,
+        )
+
+    result = orchestrator.run_all(session_id=session_id)
+    observations: List[Dict[str, Any]] = []
+    for status_key, status in (
+        ("completed", "success"),
+        ("failed", "error"),
+        ("blocked", "blocked"),
+    ):
+        for item in result.get(status_key, []):
+            observations.append({
+                "tool": item.get("tool") or "sub_agent",
+                "args": item.get("args", {}),
+                "result_summary": (
+                    item.get("message")
+                    or item.get("error")
+                    or item.get("reason")
+                    or item.get("name", "")
+                ),
+                "output_files": item.get("files", []),
+                "status": status,
+                "task_id": item.get("task_id", ""),
+                "goal": item.get("name", ""),
+            })
+
+    return {
+        "executor_text": result.get("summary", "子Agent 执行完成"),
+        "tool_observations": observations,
+        "output_files": result.get("all_output_files", []),
+    }
+
+def _run_bio_agent_sync(
+    history_messages: list,
+    session_id: str = "",
+) -> Dict[str, Any]:
     """
     Multi-Agent 主入口：
     1. 压缩上下文
@@ -120,7 +183,6 @@ async def run_bio_agent(history_messages: list, session_id: str = None) -> Dict[
     print(f"\n📝 [Planner] {json.dumps(planner_result, ensure_ascii=False, default=str)}")
 
     # ---- Phase 3.2: Delegator Agent (复杂任务委派检查) ----
-    from app.agent.agent_constants import FEATURE_FLAGS
     if FEATURE_FLAGS.get("sub_agent_delegation", False):
         complexity = router_result.get("complexity", "")
         steps = planner_result.get("steps", [])
@@ -133,7 +195,7 @@ async def run_bio_agent(history_messages: list, session_id: str = None) -> Dict[
             else:
                 planner_result["delegate_to_sub_agents"] = False
 
-    execution_mode = (
+    execution_mode = _normalize_execution_mode(
         planner_result.get("execution_mode")
         or router_result.get("suggested_mode")
         or "tool_execution"
@@ -177,7 +239,7 @@ async def run_bio_agent(history_messages: list, session_id: str = None) -> Dict[
             "planner_result": planner_result
         }
 
-        messages = [
+        messages: Any = [
             {"role": "system", "content": domain_prompt},
             {"role": "system", "content": REPORTER_PROMPT},
             {
@@ -208,13 +270,19 @@ async def run_bio_agent(history_messages: list, session_id: str = None) -> Dict[
 
         return _make_agent_result(final_answer, files=[])
 
-    executor_result = run_executor_agent(
-        context_pack=context_pack,
-        router_result=router_result,
-        planner_result=planner_result,
-        session_id=session_id,
-        selected_skill=selected_skill,
-    )
+    if planner_result.get("delegate_to_sub_agents") and planner_result.get("sub_tasks"):
+        executor_result = _run_delegated_tasks(
+            planner_result["sub_tasks"],
+            session_id or "",
+        )
+    else:
+        executor_result = run_executor_agent(
+            context_pack=context_pack,
+            router_result=router_result,
+            planner_result=planner_result,
+            session_id=session_id,
+            selected_skill=selected_skill,
+        )
 
     print(
         f"\n⚙️ [Executor Summary] "
@@ -248,3 +316,27 @@ async def run_bio_agent(history_messages: list, session_id: str = None) -> Dict[
     )
 
     return _make_agent_result(final_answer, files=output_files)
+
+
+async def run_bio_agent(
+    history_messages: list,
+    session_id: str = "",
+) -> Dict[str, Any]:
+    """在线程中运行同步 Agent/工具链，避免阻塞 FastAPI 事件循环。"""
+    try:
+        return await asyncio.to_thread(
+            _run_bio_agent_sync,
+            history_messages,
+            session_id,
+        )
+    finally:
+        if FEATURE_FLAGS.get("hooks_enabled", False):
+            try:
+                from app.agent.hooks import HookPoint, hook_manager
+
+                hook_manager.trigger(
+                    HookPoint.POST_AGENT_TURN,
+                    {"session_id": session_id or ""},
+                )
+            except Exception:
+                pass

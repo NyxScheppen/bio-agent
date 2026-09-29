@@ -16,7 +16,6 @@ import time
 import inspect
 import threading
 import concurrent.futures
-import json
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
@@ -25,21 +24,19 @@ from app.agent.tool_context import ToolExecutionContext, create_tool_context
 from app.agent.tool_result import (
     ToolResult,
     OutputFile,
-    ToolProvenance,
     ResourceUsage,
     RetryRecord,
-    make_success_result,
-    make_error_result,
     normalize_tool_result,
     _coerce_output_file,
 )
 from app.agent.tool_registry import get_tool_meta
 from app.agent.agent_constants import (
+    FEATURE_FLAGS,
     DEFAULT_TOOL_TIMEOUT_SECONDS,
     MAX_TOOL_TIMEOUT_SECONDS,
     DEFAULT_MAX_MEMORY_MB,
-    RESOURCE_CHECK_INTERVAL_SECONDS,
 )
+from app.utils.file_utils import build_file_url
 
 # psutil 是可选依赖，缺失时资源监控自动降级
 try:
@@ -211,7 +208,7 @@ def collect_generated_files(job_dir: str) -> List[Dict[str, Any]]:
             except ValueError:
                 rel = p.relative_to(job_path).as_posix()
 
-        url = f"/files/{rel}"
+        url = build_file_url(rel)
 
         files.append({
             "name": p.name,
@@ -375,15 +372,32 @@ def run_tool_with_lifecycle(
     started_at = time.strftime("%Y-%m-%dT%H:%M:%S")
     t_start = time.time()
 
+    # ---- Phase 5.2: Pre-tool Hook ----
+    if FEATURE_FLAGS.get("hooks_enabled", False):
+        try:
+            from app.agent.hooks import HookPoint, hook_manager
+
+            hook_manager.trigger(HookPoint.PRE_TOOL_EXECUTION, {
+                "tool_name": tool_name,
+                "session_id": session_id or "",
+                "job_dir": ctx.job_dir,
+                "parameters": dict(function_args or {}),
+            })
+        except Exception:
+            pass
+
     # 3-4. 执行工具（ThreadPoolExecutor + timeout）
     raw_result = None
     exception_occurred = False
 
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    future = executor.submit(func, **function_args)
+    timed_out = False
     try:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(func, **function_args)
-            raw_result = future.result(timeout=effective_timeout)
+        raw_result = future.result(timeout=effective_timeout)
     except concurrent.futures.TimeoutError:
+        timed_out = True
+        future.cancel()
         exception_occurred = True
         raw_result = {
             "status": "error",
@@ -397,22 +411,14 @@ def run_tool_with_lifecycle(
             "message": f"工具执行异常: {str(e)}",
             "tool": tool_name,
         }
+    finally:
+        # Python 线程无法强制终止；超时时立即返回，未启动任务会被取消，
+        # 已运行任务由工具自身的进程级超时负责收敛。
+        executor.shutdown(wait=not timed_out, cancel_futures=timed_out)
 
     t_end = time.time()
     finished_at = time.strftime("%Y-%m-%dT%H:%M:%S")
     runtime_seconds = round(t_end - t_start, 3)
-
-    # ---- Phase 5.2: Pre-tool Hook ----
-    try:
-        from app.agent.hooks import hook_manager, HookPoint
-        hook_manager.trigger(HookPoint.PRE_TOOL_EXECUTION, {
-            "tool_name": tool_name,
-            "session_id": session_id or "",
-            "job_dir": ctx.job_dir,
-            "parameters": dict(function_args or {}),
-        })
-    except Exception:
-        pass
 
     # ---- Feature 1: 收集资源使用 ----
     if exception_occurred and isinstance(raw_result, dict) and "超时" in str(raw_result.get("message", "")):
@@ -460,19 +466,21 @@ def run_tool_with_lifecycle(
         normalized.errors.append(str(raw_result.get("message", "未知异常")))
 
     # ---- Phase 5.2: Post-tool Hook ----
-    try:
-        from app.agent.hooks import hook_manager, HookPoint
-        hook_manager.trigger(HookPoint.POST_TOOL_EXECUTION, {
-            "tool_name": tool_name,
-            "session_id": session_id or "",
-            "job_id": ctx.job_id,
-            "job_dir": ctx.job_dir,
-            "status": normalized.status,
-            "runtime_seconds": runtime_seconds,
-            "message": normalized.message[:300],
-        })
-    except Exception:
-        pass
+    if FEATURE_FLAGS.get("hooks_enabled", False):
+        try:
+            from app.agent.hooks import HookPoint, hook_manager
+
+            hook_manager.trigger(HookPoint.POST_TOOL_EXECUTION, {
+                "tool_name": tool_name,
+                "session_id": session_id or "",
+                "job_id": ctx.job_id,
+                "job_dir": ctx.job_dir,
+                "status": normalized.status,
+                "runtime_seconds": runtime_seconds,
+                "message": normalized.message[:300],
+            })
+        except Exception:
+            pass
 
     # ---- Feature 2: 审计日志 ----
     _audit_tool_execution_safe(normalized, session_id=session_id or "")

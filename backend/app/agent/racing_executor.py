@@ -18,9 +18,11 @@ Waterfall Racing 竞速执行器 (Phase 1.2).
 """
 
 import concurrent.futures
+import inspect
 import time
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
+from app.agent.agent_utils import result_status
 from app.agent.tool_registry import TOOL_REGISTRY, TOOL_META
 from app.agent.tool_runner import run_tool_with_lifecycle
 from app.agent.tool_result import ToolResult
@@ -32,6 +34,8 @@ class RaceResult:
     def __init__(self):
         self.winner: Optional[ToolResult] = None
         self.winner_tool_name: str = ""
+        self.fallback_result: Optional[ToolResult] = None
+        self.fallback_tool_name: str = ""
         self.losers: List[Dict[str, Any]] = []
         self.all_completed: bool = False
         self.total_runtime: float = 0.0
@@ -99,15 +103,17 @@ def race_tools(
         RaceResult
     """
     result = RaceResult()
-    t_start = time.time()
+    t_start = time.monotonic()
 
     # 验证和准备
     valid_tools = []
     for name in tool_names:
-        if name in TOOL_REGISTRY:
+        if name in TOOL_REGISTRY and name not in valid_tools:
             valid_tools.append(name)
 
     if not valid_tools:
+        result.all_completed = True
+        result.total_runtime = round(time.monotonic() - t_start, 3)
         return result
 
     if len(valid_tools) == 1:
@@ -118,16 +124,23 @@ def race_tools(
             func=func,
             function_args=function_args,
             session_id=session_id,
+            timeout_override=timeout,
         )
-        result.winner = r
-        result.winner_tool_name = valid_tools[0]
+        if _is_success(r):
+            result.winner = r
+            result.winner_tool_name = valid_tools[0]
+        else:
+            result.fallback_result = r
+            result.fallback_tool_name = valid_tools[0]
         result.all_completed = True
-        result.total_runtime = time.time() - t_start
+        result.total_runtime = round(time.monotonic() - t_start, 3)
         return result
 
-    with concurrent.futures.ThreadPoolExecutor(
-        max_workers=min(max_workers, len(valid_tools))
-    ) as executor:
+    executor = concurrent.futures.ThreadPoolExecutor(
+        max_workers=max(1, min(max_workers, len(valid_tools)))
+    )
+    future_to_name: Dict[concurrent.futures.Future, str] = {}
+    try:
         future_to_name = {}
         for name in valid_tools:
             func = TOOL_REGISTRY[name]
@@ -135,57 +148,120 @@ def race_tools(
                 run_tool_with_lifecycle,
                 tool_name=name,
                 func=func,
-                function_args=function_args,
+                function_args=dict(function_args),
                 session_id=session_id,
+                timeout_override=timeout,
             )
             future_to_name[future] = name
 
-        winner_found = False
-
-        for future in concurrent.futures.as_completed(future_to_name):
+        for future in concurrent.futures.as_completed(
+            future_to_name,
+            timeout=max(1, int(timeout)),
+        ):
             name = future_to_name[future]
 
             try:
-                tool_result = future.result(timeout=timeout)
-            except concurrent.futures.TimeoutError:
-                result.losers.append({
-                    "tool_name": name,
-                    "status": "timeout",
-                    "reason": f"超时（>{timeout}秒）",
-                })
-                continue
-            except Exception as e:
+                tool_result = future.result()
+            except Exception as exc:
                 result.losers.append({
                     "tool_name": name,
                     "status": "error",
-                    "reason": str(e),
+                    "reason": str(exc),
                 })
                 continue
 
-            if not winner_found and tool_result and _is_success(tool_result):
+            if result.fallback_result is None:
+                result.fallback_result = tool_result
+                result.fallback_tool_name = name
+
+            if tool_result and _is_success(tool_result):
                 result.winner = tool_result
                 result.winner_tool_name = name
-                winner_found = True
-                # 不 cancel 其他 future — ThreadPoolExecutor 不支持真正的取消
-                # 但后续结果都会被记为 loser
-            else:
-                status = tool_result.status if tool_result else "null"
-                reason = tool_result.message if tool_result else "无返回值"
-                result.losers.append({
-                    "tool_name": name,
-                    "status": status,
-                    "reason": reason[:200],
-                })
+                break
 
-    result.all_completed = True
-    result.total_runtime = round(time.time() - t_start, 3)
-
-    # 如果没有 winner，取第一个完成的结果作为 winner（即使失败）
-    if not result.winner and result.losers:
-        # 这种情况不应该出现（所有 future 都被循环处理了）
+            status = result_status(tool_result) or "error"
+            reason = getattr(tool_result, "message", "") if tool_result else "无返回值"
+            result.losers.append({
+                "tool_name": name,
+                "status": status,
+                "reason": str(reason)[:200],
+            })
+    except concurrent.futures.TimeoutError:
         pass
+    finally:
+        recorded = {item["tool_name"] for item in result.losers}
+        for future, name in future_to_name.items():
+            if name == result.winner_tool_name or name in recorded:
+                continue
+            if future.done():
+                status = "completed_not_selected"
+            elif future.cancel():
+                status = "cancelled"
+            else:
+                status = "running"
+            result.losers.append({
+                "tool_name": name,
+                "status": status,
+                "reason": "竞速已产生胜者" if result.winner else "竞速等待超时",
+            })
+
+        result.all_completed = all(future.done() for future in future_to_name)
+        result.total_runtime = round(time.monotonic() - t_start, 3)
+        executor.shutdown(wait=False, cancel_futures=True)
 
     return result
+
+
+def get_compatible_racing_candidates(
+    tool_name: str,
+    available_tool_names: set,
+    function_args: Dict[str, Any],
+) -> List[str]:
+    """返回同组且能接受同一组参数的工具，避免错误的跨 schema 竞速。"""
+    return [
+        candidate
+        for candidate in _find_racing_candidates(tool_name, available_tool_names)
+        if _tool_accepts_arguments(candidate, function_args)
+    ]
+
+
+def _tool_accepts_arguments(tool_name: str, function_args: Dict[str, Any]) -> bool:
+    func = TOOL_REGISTRY.get(tool_name)
+    if func is None or not isinstance(function_args, dict):
+        return False
+
+    try:
+        parameters = inspect.signature(func).parameters
+    except (TypeError, ValueError):
+        return False
+
+    injected = {"session_id", "job_dir", "context"}
+    accepts_extra = any(
+        parameter.kind == inspect.Parameter.VAR_KEYWORD
+        for parameter in parameters.values()
+    )
+    accepted_names = {
+        name
+        for name, parameter in parameters.items()
+        if parameter.kind in {
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            inspect.Parameter.KEYWORD_ONLY,
+        }
+    }
+    if not accepts_extra and any(name not in accepted_names for name in function_args):
+        return False
+
+    required_names = {
+        name
+        for name, parameter in parameters.items()
+        if name not in injected
+        and parameter.kind in {
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            inspect.Parameter.KEYWORD_ONLY,
+        }
+        and parameter.default is inspect.Parameter.empty
+    }
+    return required_names.issubset(function_args)
 
 
 def should_race(
@@ -240,7 +316,11 @@ def get_racing_candidates_for_step(
     for t in preferred:
         if t not in available_tool_names:
             continue
-        candidates = _find_racing_candidates(t, available_tool_names)
+        candidates = get_compatible_racing_candidates(
+            t,
+            available_tool_names,
+            planner_step.get("parameters", {}) or {},
+        )
         if len(candidates) >= 2:
             return candidates
 
@@ -248,11 +328,9 @@ def get_racing_candidates_for_step(
 
 
 def _is_success(result: Any) -> bool:
-    """判断工具结果是否成功。"""
+    """判断工具结果是否成功（无 status 的非 dict 对象宽松视为成功）。"""
     if result is None:
         return False
-    if hasattr(result, "status"):
-        return str(getattr(result, "status", "")).lower() == "success"
-    if isinstance(result, dict):
-        return str(result.get("status", "")).lower() == "success"
+    if isinstance(result, dict) or hasattr(result, "status"):
+        return result_status(result) == "success"
     return True

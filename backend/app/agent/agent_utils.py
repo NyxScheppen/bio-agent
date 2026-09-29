@@ -1,5 +1,4 @@
 import json
-import inspect
 import re
 from typing import Any, Dict, List, Tuple, Union
 
@@ -10,6 +9,7 @@ from app.agent.agent_constants import (
     PDF_EXTS,
     DOWNLOADABLE_EXTS,
 )
+from app.utils.file_utils import build_file_url
 
 # 延迟导入，避免循环引用
 _TOOL_RESULT_IMPORTED = False
@@ -58,6 +58,39 @@ def to_jsonable(value: Any) -> Any:
         return str(value)
 
 
+def to_plain_dict(obj: Any) -> Dict[str, Any] | None:
+    """
+    把 Pydantic 模型（v1/v2）或 dict 解包为普通 dict。
+
+    None / 非 dict 且无 model_dump/dict 的对象返回 None。
+    """
+    if obj is None:
+        return None
+    if isinstance(obj, dict):
+        return obj
+    if hasattr(obj, "model_dump"):
+        return obj.model_dump()
+    if hasattr(obj, "dict"):
+        return obj.dict()
+    return None
+
+
+def result_status(obj: Any) -> str:
+    """读取对象/字典的 status 字段并小写；无 status 时返回空串。"""
+    if obj is None:
+        return ""
+    if isinstance(obj, dict):
+        return str(obj.get("status", "") or "").lower()
+    if hasattr(obj, "status"):
+        return str(getattr(obj, "status", "") or "").lower()
+    return ""
+
+
+def is_error_result(obj: Any) -> bool:
+    """判断工具结果是否为 error 状态。"""
+    return result_status(obj) == "error"
+
+
 def parse_tool_result(tool_result: Any) -> Any:
     if isinstance(tool_result, dict):
         return tool_result
@@ -104,21 +137,6 @@ def sanitize_final_answer(text: str) -> str:
     return text.strip()
 
 
-def inject_runtime_args(func, function_args: dict, session_id: str = None) -> dict:
-    if function_args is None:
-        function_args = {}
-
-    try:
-        sig = inspect.signature(func)
-        params = sig.parameters
-        if session_id and "session_id" in params:
-            function_args["session_id"] = session_id
-    except Exception:
-        pass
-
-    return function_args
-
-
 def _normalize_output_file_item(file_obj: Any) -> Dict[str, Any] | None:
     """
     尽量把工具返回的文件对象归一化。
@@ -136,21 +154,18 @@ def _normalize_output_file_item(file_obj: Any) -> Dict[str, Any] | None:
 
     # 处理 Pydantic OutputFile 对象
     if not isinstance(file_obj, (dict, str, int, float, bool, list, type(None))):
-        if hasattr(file_obj, "model_dump"):
-            file_obj = file_obj.model_dump()
-        elif hasattr(file_obj, "dict"):
-            file_obj = file_obj.dict()
-        else:
+        file_obj = to_plain_dict(file_obj)
+        if file_obj is None:
             return None
 
     if not isinstance(file_obj, dict):
         return None
 
-    name = str(file_obj.get("name") or "").strip()
+    name = str(file_obj.get("name") or file_obj.get("file_name") or file_obj.get("filename") or "").strip()
     url = str(file_obj.get("url") or "").strip()
     relative_path = str(file_obj.get("relative_path") or "").strip()
     path = str(file_obj.get("path") or "").strip()
-    size_bytes = file_obj.get("size_bytes", "")
+    size_bytes = file_obj.get("size_bytes") or file_obj.get("size") or file_obj.get("file_size") or ""
 
     if not name and relative_path:
         name = relative_path.replace("\\", "/").split("/")[-1]
@@ -166,12 +181,12 @@ def _normalize_output_file_item(file_obj: Any) -> Dict[str, Any] | None:
         relative_path = relative_path[len("/files/"):].strip("/")
 
     if relative_path and not url:
-        url = f"/files/{relative_path}"
+        url = build_file_url(relative_path)
 
     if not name and not url and not relative_path:
         return None
 
-    normalized = {
+    normalized: Dict[str, Any] = {
         "name": name,
         "url": url,
         "relative_path": relative_path,
@@ -236,12 +251,9 @@ def extract_output_files(tool_result: Any) -> List[Dict[str, Any]]:
             files = []
             ofs = getattr(tool_result, "output_files", [])
             for f in (ofs or []):
-                if isinstance(f, dict):
-                    files.append(f)
-                elif hasattr(f, "model_dump"):
-                    files.append(f.model_dump())
-                elif hasattr(f, "dict"):
-                    files.append(f.dict())
+                d = to_plain_dict(f)
+                if d is not None:
+                    files.append(d)
             return _dedupe_output_files(files)
 
     # 先尽量解析字符串 JSON
@@ -262,24 +274,18 @@ def extract_output_files(tool_result: Any) -> List[Dict[str, Any]]:
     direct_files = data.get("output_files", [])
     if isinstance(direct_files, list):
         for item in direct_files:
-            if isinstance(item, dict):
-                files.append(item)
-            elif hasattr(item, "model_dump"):
-                # Pydantic v2
-                files.append(item.model_dump())
-            elif hasattr(item, "dict"):
-                # Pydantic v1
-                files.append(item.dict())
+            d = to_plain_dict(item)
+            if d is not None:
+                files.append(d)
 
     # 2. 某些工具可能返回 output_images / output_pdfs
     for key in ["output_images", "output_pdfs"]:
         extra_files = data.get(key, [])
         if isinstance(extra_files, list):
             for item in extra_files:
-                if isinstance(item, dict):
-                    files.append(item)
-                elif hasattr(item, "model_dump"):
-                    files.append(item.model_dump())
+                d = to_plain_dict(item)
+                if d is not None:
+                    files.append(d)
 
     # 3. 递归检查常见嵌套字段
     nested_keys = [
@@ -389,19 +395,17 @@ def build_file_display_hint(output_files: List[Dict[str, Any]]) -> str:
 def build_compact_tool_summary(tool_result: Any) -> str:
     # --- 处理标准 ToolResult 对象 ---
     if not isinstance(tool_result, (str, int, float, bool, list, dict, type(None))):
-        if hasattr(tool_result, "model_dump"):
-            # Pydantic v2
-            data = tool_result.model_dump()
-        elif hasattr(tool_result, "dict"):
-            # Pydantic v1
-            data = tool_result.dict()
-        elif hasattr(tool_result, "output_files"):
+        data = to_plain_dict(tool_result)
+        if data is None and hasattr(tool_result, "output_files"):
             data = {
                 "status": getattr(tool_result, "status", ""),
                 "message": getattr(tool_result, "message", ""),
-                "output_files": [f.model_dump() if hasattr(f, "model_dump") else f for f in (getattr(tool_result, "output_files", None) or [])],
+                "output_files": [
+                    pd if (pd := to_plain_dict(f)) is not None else f
+                    for f in (getattr(tool_result, "output_files", None) or [])
+                ],
             }
-        else:
+        if data is None:
             return safe_message_content(str(tool_result))
     else:
         data = parse_tool_result(tool_result)
@@ -487,8 +491,6 @@ def extract_json_object(text: str) -> Dict[str, Any]:
 def get_real_image_urls(output_files: List[Dict[str, Any]]) -> set:
     urls = set()
 
-    image_suffixes = (".png", ".jpg", ".jpeg", ".svg", ".gif", ".webp")
-
     for f in output_files or []:
         if not isinstance(f, dict):
             continue
@@ -499,7 +501,7 @@ def get_real_image_urls(output_files: List[Dict[str, Any]]) -> set:
         if not url:
             continue
 
-        if name.endswith(image_suffixes) or url.lower().split("?")[0].endswith(image_suffixes):
+        if name.endswith(IMAGE_EXTS) or url.lower().split("?")[0].endswith(IMAGE_EXTS):
             urls.add(url)
 
     return urls

@@ -241,10 +241,8 @@ bio_test/
 │
 ├── runtime/                   # 运行时文件（启动脚本等）
 ├── logs/                      # 日志目录
-└── docs/                      # 开发文档
-    ├── tool_result_standard.md    # ToolResult 协议文档
-    ├── tool_lifecycle.md          # 工具生命周期文档
-    └── tool_registration.md       # 工具注册文档
+└── docs/                      # 文档
+    └── mindmap.html              # 系统架构思维导图
 ```
 
 ---
@@ -288,6 +286,9 @@ bio_test/
 ---
 
 ## 6. Multi-Agent 流水线
+
+各 Agent 的字段契约、失败传播、并行/竞速语义和边缘情况以
+[`docs/multi-agent-behavior.md`](docs/multi-agent-behavior.md) 为准。
 
 ### 6.1 概述
 
@@ -982,7 +983,7 @@ Rule(
 FEATURE_FLAGS = {
     "parallel_execution": True,       # 依赖感知并行执行
     "waterfall_racing": True,         # Waterfall Racing 竞速
-    "sub_agent_delegation": False,    # 子Agent委派（需更多测试）
+    "sub_agent_delegation": True,     # 子Agent委派
     "structured_rules_engine": True,  # 结构化规则引擎
     "hooks_enabled": True,            # Hook 系统
     "slash_commands": True,           # 斜杠命令

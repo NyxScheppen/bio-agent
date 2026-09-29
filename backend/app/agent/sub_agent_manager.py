@@ -21,11 +21,12 @@
 
 import concurrent.futures
 import time
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Dict, List
 
 from pydantic import BaseModel, Field
 
-from app.agent.tool_registry import TOOL_REGISTRY, get_tool_meta
+from app.agent.agent_utils import result_status, to_plain_dict
+from app.agent.tool_registry import TOOL_REGISTRY
 from app.agent.tool_runner import run_tool_with_lifecycle
 
 
@@ -35,8 +36,8 @@ class SubAgentTask(BaseModel):
     tool: str = ""                      # 工具名
     args: Dict[str, Any] = Field(default_factory=dict)
     depends_on: List[int] = Field(default_factory=list)  # 依赖的任务索引
-    max_retries: int = 1
-    timeout: int = 600
+    max_retries: int = Field(default=1, ge=0, le=3)
+    timeout: int = Field(default=600, ge=10, le=3600)
 
 
 class SubAgentResult(BaseModel):
@@ -44,13 +45,14 @@ class SubAgentResult(BaseModel):
     task_index: int = 0
     goal: str = ""
     tool: str = ""
-    status: str = "pending"  # success / error / timeout
+    status: str = "pending"  # success / partial / error / timeout / blocked
     message: str = ""
     output_files: List[Dict[str, Any]] = Field(default_factory=list)
     job_id: str = ""
     errors: List[str] = Field(default_factory=list)
     warnings: List[str] = Field(default_factory=list)
     runtime_seconds: float = 0.0
+    attempts: int = 0
 
 
 class SubAgentManager:
@@ -64,8 +66,7 @@ class SubAgentManager:
     """
 
     def __init__(self, max_workers: int = 4):
-        self.max_workers = max_workers
-        self._results: Dict[int, SubAgentResult] = {}
+        self.max_workers = max(1, int(max_workers))
 
     def spawn_and_collect_all(
         self,
@@ -88,31 +89,46 @@ class SubAgentManager:
             return []
 
         results: Dict[int, SubAgentResult] = {}
-        t_start = time.time()
+        task_count = len(tasks)
 
         with concurrent.futures.ThreadPoolExecutor(
-            max_workers=min(self.max_workers, len(tasks))
+            max_workers=min(self.max_workers, task_count)
         ) as executor:
-            # 拓扑排序：按依赖关系分批
-            pending = list(enumerate(tasks))
+            pending = dict(enumerate(tasks))
             futures: Dict[concurrent.futures.Future, int] = {}
 
             while pending or futures:
-                # 提交无依赖或依赖已满足的任务
-                ready = []
-                still_pending = []
-                for idx, task in pending:
-                    deps_satisfied = all(
-                        dep in results and results[dep].status == "success"
-                        for dep in task.depends_on
-                    )
-                    if deps_satisfied:
-                        ready.append((idx, task))
-                    else:
-                        still_pending.append((idx, task))
-                pending = still_pending
+                submitted = False
+                for idx, task in list(pending.items()):
+                    invalid_dependencies = [
+                        dep for dep in task.depends_on
+                        if dep < 0 or dep >= task_count or dep == idx
+                    ]
+                    if invalid_dependencies:
+                        results[idx] = self._blocked_result(
+                            task,
+                            idx,
+                            f"无效依赖: {invalid_dependencies}",
+                        )
+                        pending.pop(idx)
+                        continue
 
-                for idx, task in ready:
+                    failed_dependencies = [
+                        dep for dep in task.depends_on
+                        if dep in results and results[dep].status != "success"
+                    ]
+                    if failed_dependencies:
+                        results[idx] = self._blocked_result(
+                            task,
+                            idx,
+                            f"依赖任务失败: {failed_dependencies}",
+                        )
+                        pending.pop(idx)
+                        continue
+
+                    if not all(dep in results for dep in task.depends_on):
+                        continue
+
                     future = executor.submit(
                         self._execute_single_task,
                         task,
@@ -120,67 +136,56 @@ class SubAgentManager:
                         session_id,
                     )
                     futures[future] = idx
+                    pending.pop(idx)
+                    submitted = True
 
-                # 如果还有 future 在运行，等待一个完成
                 if futures:
-                    done_futures = set()
-                    for future in list(futures.keys()):
-                        if future.done():
-                            done_futures.add(future)
-                            idx = futures.pop(future)
-                            try:
-                                results[idx] = future.result(timeout=10)
-                            except Exception as e:
-                                results[idx] = SubAgentResult(
-                                    task_index=idx,
-                                    goal=tasks[idx].goal,
-                                    tool=tasks[idx].tool,
-                                    status="error",
-                                    message=str(e),
-                                    errors=[str(e)],
-                                )
+                    done, _ = concurrent.futures.wait(
+                        futures,
+                        return_when=concurrent.futures.FIRST_COMPLETED,
+                    )
+                    for future in done:
+                        idx = futures.pop(future)
+                        try:
+                            results[idx] = future.result()
+                        except Exception as exc:
+                            results[idx] = SubAgentResult(
+                                task_index=idx,
+                                goal=tasks[idx].goal,
+                                tool=tasks[idx].tool,
+                                status="error",
+                                message=str(exc),
+                                errors=[str(exc)],
+                            )
+                    continue
 
-                    if not done_futures and futures:
-                        # 等第一个完成
-                        done, _ = concurrent.futures.wait(
-                            futures.keys(),
-                            return_when=concurrent.futures.FIRST_COMPLETED,
-                            timeout=30,
+                if pending and not submitted:
+                    # 没有运行中任务且没有任务可提交，只可能是循环或不可解析依赖。
+                    unresolved = sorted(pending)
+                    for idx, task in list(pending.items()):
+                        results[idx] = self._blocked_result(
+                            task,
+                            idx,
+                            f"循环或不可解析依赖: {unresolved}",
                         )
-                        for future in done:
-                            idx = futures.pop(future)
-                            try:
-                                results[idx] = future.result(timeout=10)
-                            except Exception as e:
-                                results[idx] = SubAgentResult(
-                                    task_index=idx,
-                                    goal=tasks[idx].goal,
-                                    tool=tasks[idx].tool,
-                                    status="error",
-                                    message=str(e),
-                                    errors=[str(e)],
-                                )
+                        pending.pop(idx)
 
-        # 收集未执行的任务
-        for idx, task in enumerate(tasks):
-            if idx not in results:
-                # 检查是否有失败的依赖
-                failed_deps = [
-                    dep for dep in task.depends_on
-                    if dep in results and results[dep].status != "success"
-                ]
-                results[idx] = SubAgentResult(
-                    task_index=idx,
-                    goal=task.goal,
-                    tool=task.tool,
-                    status="error",
-                    message=f"依赖未满足: {failed_deps}" if failed_deps else "未执行",
-                    errors=[f"未满足的依赖: {failed_deps}"] if failed_deps else [],
-                )
+        return [results[index] for index in range(task_count)]
 
-        # 按索引排序返回
-        total_time = round(time.time() - t_start, 3)
-        return [results[i] for i in sorted(results.keys())]
+    @staticmethod
+    def _blocked_result(
+        task: SubAgentTask,
+        task_index: int,
+        reason: str,
+    ) -> SubAgentResult:
+        return SubAgentResult(
+            task_index=task_index,
+            goal=task.goal,
+            tool=task.tool,
+            status="blocked",
+            message=reason,
+            errors=[reason],
+        )
 
     def _execute_single_task(
         self,
@@ -189,6 +194,7 @@ class SubAgentManager:
         session_id: str,
     ) -> SubAgentResult:
         """执行单个子Agent 任务。"""
+        started = time.monotonic()
         func = TOOL_REGISTRY.get(task.tool)
         if not func:
             return SubAgentResult(
@@ -198,45 +204,67 @@ class SubAgentManager:
                 status="error",
                 message=f"工具 {task.tool} 未注册",
                 errors=[f"tool_not_registered: {task.tool}"],
+                runtime_seconds=round(time.monotonic() - started, 3),
             )
 
-        try:
-            result = run_tool_with_lifecycle(
-                tool_name=task.tool,
-                func=func,
-                function_args=task.args,
-                session_id=f"{session_id}_sub_{task_index}" if session_id else "",
-            )
+        result: Any = None
+        last_exception: Exception | None = None
+        attempts = 0
+        for attempts in range(1, task.max_retries + 2):
+            try:
+                result = run_tool_with_lifecycle(
+                    tool_name=task.tool,
+                    func=func,
+                    function_args=dict(task.args),
+                    session_id=f"{session_id}_sub_{task_index}" if session_id else "",
+                    timeout_override=task.timeout,
+                )
+                status = result_status(result) or "success"
+                if status != "error":
+                    break
+            except Exception as exc:
+                last_exception = exc
+                result = None
 
-            output_files = []
-            if hasattr(result, "output_files"):
-                for f in (result.output_files or []):
-                    if hasattr(f, "model_dump"):
-                        output_files.append(f.model_dump())
-                    elif isinstance(f, dict):
-                        output_files.append(f)
-
-            return SubAgentResult(
-                task_index=task_index,
-                goal=task.goal,
-                tool=task.tool,
-                status=result.status if hasattr(result, "status") else "success",
-                message=result.message if hasattr(result, "message") else "",
-                output_files=output_files,
-                job_id=result.provenance.job_id if hasattr(result, "provenance") else "",
-                errors=result.errors if hasattr(result, "errors") else [],
-                warnings=result.warnings if hasattr(result, "warnings") else [],
-            )
-
-        except Exception as e:
+        runtime_seconds = round(time.monotonic() - started, 3)
+        if result is None:
+            message = str(last_exception or "子Agent 执行失败")
             return SubAgentResult(
                 task_index=task_index,
                 goal=task.goal,
                 tool=task.tool,
                 status="error",
-                message=str(e),
-                errors=[str(e)],
+                message=message,
+                errors=[message],
+                runtime_seconds=runtime_seconds,
+                attempts=attempts,
             )
+
+        output_files = []
+        for output_file in getattr(result, "output_files", []) or []:
+            plain_file = to_plain_dict(output_file)
+            if plain_file is not None:
+                output_files.append(plain_file)
+
+        status = result_status(result) or "success"
+        provenance = getattr(result, "provenance", None)
+        resource_usage = getattr(provenance, "resource_usage", None)
+        if getattr(resource_usage, "timeout_triggered", False):
+            status = "timeout"
+
+        return SubAgentResult(
+            task_index=task_index,
+            goal=task.goal,
+            tool=task.tool,
+            status=status,
+            message=getattr(result, "message", ""),
+            output_files=output_files,
+            job_id=getattr(provenance, "job_id", ""),
+            errors=list(getattr(result, "errors", []) or []),
+            warnings=list(getattr(result, "warnings", []) or []),
+            runtime_seconds=runtime_seconds,
+            attempts=attempts,
+        )
 
 
 # 全局单例

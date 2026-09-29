@@ -5,7 +5,6 @@ from app.agent.task_prompts import PLANNER_PROMPT
 from app.agent.category_router import (
     normalize_categories,
     infer_categories_from_text,
-    resolve_tool_categories,
 )
 from app.agent.tool_registry import get_tool_brief_by_categories
 
@@ -86,14 +85,21 @@ def run_planner_agent(
 
     result = call_json_agent(PLANNER_PROMPT, payload)
 
-    if not result:
+    if not result or result.get("error"):
         max_rounds = selected_skill.max_tool_rounds if selected_skill else 8
+        router_mode = str(router_result.get("suggested_mode", "")).lower()
+        if router_mode == "direct_answer":
+            router_mode = "answer_only"
+        if router_mode not in {"answer_only", "tool_execution", "ask_user"}:
+            router_mode = "tool_execution"
         result = {
             "objective": selected_skill.description if selected_skill else "根据用户需求执行分析",
-            "execution_mode": "ask_user" if router_result.get("need_clarification") else "tool_execution",
+            "execution_mode": "ask_user" if router_result.get("need_clarification") else router_mode,
             "tool_categories": router_categories or ["general"],
             "user_question_if_any": router_result.get("clarification_question", ""),
             "steps": [],
+            "step_dependencies": {},
+            "parallel_groups": [],
             "max_tool_rounds": max_rounds,
             "final_report_requirements": [
                 "说明是否完成",

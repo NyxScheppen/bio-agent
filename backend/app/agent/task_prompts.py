@@ -271,7 +271,7 @@ ROUTER_PROMPT = """
   "clarification_question": "如果需要追问，写给用户的问题，否则为空字符串",
   "reason": "简短判断依据",
   "risk_flags": ["缺少文件", "缺少分组列", "缺少time/status", "..."],
-  "suggested_mode": "direct_answer|tool_execution|ask_user",
+  "suggested_mode": "answer_only|tool_execution|ask_user",
   "tool_categories": ["file_io", "survival", "transcriptome", "system", "general"]
 }
 
@@ -305,10 +305,13 @@ PLANNER_PROMPT = """
       "step_id": 1,
       "goal": "这一步要做什么",
       "preferred_tools": ["工具名1"],
+      "parameters": {"参数名": "来自用户上下文的值或 $step_N"},
       "parameter_strategy": "参数如何补全",
       "success_criteria": "如何判断成功"
     }
   ],
+  "step_dependencies": {},
+  "parallel_groups": [],
   "max_tool_rounds": 8,
   "final_report_requirements": [
     "说明是否完成",
@@ -327,6 +330,11 @@ PLANNER_PROMPT = """
 6. DESeq2 必须用于 raw count 或用户明确说明 count matrix 的场景。
 7. R 环境检测任务优先使用 scan_system_config。
 8. 不要安排不存在于 available_tools 的工具。
+9. parameters 必须是可直接传给工具的 JSON 对象；不得把 parameter_strategy 文本当作参数。
+10. 只有参数已明确时才填写 parallel_groups；缺少必需参数时应使用 ask_user。
+11. step_dependencies 的键和值都是 step_id；parallel_groups 只声明允许并发的 step_id。
+12. 参数需要引用前一步产物时使用精确值 "$step_N"，并在 step_dependencies 中声明依赖 N。
+13. 存在两个或更多参数完整且互不依赖的步骤时，应把它们的 step_id 放入同一个 parallel_groups 项。
 """
 
 EXECUTOR_ROLE_PROMPT = """

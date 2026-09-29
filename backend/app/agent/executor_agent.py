@@ -12,6 +12,7 @@ from app.agent.category_router import resolve_tool_categories, filter_tools_sche
 from app.agent.tool_result import make_error_result
 from app.agent.tool_runner import run_tool_with_lifecycle, execute_recovery_strategies
 from app.agent.agent_constants import (
+    FEATURE_FLAGS,
     MAX_TOOL_TIMEOUT_SECONDS,
 )
 from app.agent.agent_utils import (
@@ -21,6 +22,8 @@ from app.agent.agent_utils import (
     build_file_display_hint,
     sanitize_final_answer,
     maybe_add_markdown_guidance,
+    is_error_result,
+    to_plain_dict,
 )
 
 
@@ -169,10 +172,9 @@ def _coerce_to_text(tool_result: Any) -> str:
         return tool_result
     if isinstance(tool_result, dict):
         return json.dumps(tool_result, ensure_ascii=False, default=str)
-    if hasattr(tool_result, "model_dump"):
-        return json.dumps(tool_result.model_dump(), ensure_ascii=False, default=str)
-    if hasattr(tool_result, "dict"):
-        return json.dumps(tool_result.dict(), ensure_ascii=False, default=str)
+    d = to_plain_dict(tool_result)
+    if d is not None:
+        return json.dumps(d, ensure_ascii=False, default=str)
     return str(tool_result)
 
 
@@ -296,29 +298,10 @@ def get_effective_max_tool_rounds(
     return rounds
 
 
-def is_error_result(tool_result: Any) -> bool:
-    # 处理 Pydantic / ToolResult 对象
-    if not isinstance(tool_result, (str, int, float, bool, list, dict, type(None))):
-        if hasattr(tool_result, "status"):
-            return str(getattr(tool_result, "status", "")).lower() == "error"
-        return False
-    if isinstance(tool_result, dict):
-        return str(tool_result.get("status", "")).lower() == "error"
-    return False
-
-
 def is_fatal_tool_error(tool_result: Any) -> bool:
     # 处理 Pydantic / ToolResult 对象
-    if not isinstance(tool_result, (str, int, float, bool, list, dict, type(None))):
-        if hasattr(tool_result, "model_dump"):
-            d = tool_result.model_dump()
-        elif hasattr(tool_result, "dict"):
-            d = tool_result.dict()
-        else:
-            return False
-    elif isinstance(tool_result, dict):
-        d = tool_result
-    else:
+    d = to_plain_dict(tool_result)
+    if d is None:
         return False
 
     text = "\n".join([
@@ -333,17 +316,7 @@ def is_fatal_tool_error(tool_result: Any) -> bool:
 
 def make_fatal_executor_text(function_name: str, tool_result: Any) -> str:
     # 处理 ToolResult 对象
-    if not isinstance(tool_result, (str, int, float, bool, list, dict, type(None))):
-        if hasattr(tool_result, "model_dump"):
-            d = tool_result.model_dump()
-        elif hasattr(tool_result, "dict"):
-            d = tool_result.dict()
-        else:
-            d = {}
-    elif isinstance(tool_result, dict):
-        d = tool_result
-    else:
-        d = {}
+    d = to_plain_dict(tool_result) or {}
 
     message = str(d.get("message", "")).strip()
     stderr = str(d.get("stderr", "")).strip()
@@ -431,8 +404,11 @@ def run_executor_agent(
     # ---- Phase 1.1: 并行执行检测 ----
     available_tool_names_set = tool_schema_names(executor_tools_schema)
 
-    parallel_groups = planner_result.get("parallel_groups")
-    if parallel_groups and len(parallel_groups) > 0:
+    parallel_groups = planner_result.get("parallel_groups") or []
+    step_dependencies = planner_result.get("step_dependencies") or {}
+    if FEATURE_FLAGS.get("parallel_execution", False) and (
+        parallel_groups or step_dependencies
+    ):
         print(f"\n⚡ [Executor] Parallel mode: {len(parallel_groups)} groups detected")
         return _run_parallel_execution(
             planner_result=planner_result,
@@ -579,7 +555,7 @@ def run_executor_agent(
                 "job_id": normalized_result.provenance.job_id,
                 "job_dir": normalized_result.summary.get("job_dir", ""),
                 "retry_records": [
-                    r.model_dump() if hasattr(r, "model_dump") else r
+                    pd if (pd := to_plain_dict(r)) is not None else r
                     for r in (normalized_result.retry_records or [])
                 ],
             })
@@ -654,13 +630,33 @@ def _run_parallel_execution(
     """
     并行执行模式：用 parallel_executor 按批次并发执行 Planner 步骤。
     """
-    from app.agent.parallel_executor import execute_parallel_steps, _topological_batches
+    from app.agent.parallel_executor import (
+        _build_execution_batches,
+        execute_parallel_steps,
+    )
 
     steps = planner_result.get("steps", [])
-    step_dependencies = planner_result.get("step_dependencies")
+    step_dependencies = planner_result.get("step_dependencies") or {}
 
-    # 拓扑排序分组
-    batches = _topological_batches(steps, step_dependencies)
+    try:
+        batches = _build_execution_batches(
+            steps,
+            step_dependencies,
+            parallel_groups,
+        )
+    except ValueError as exc:
+        return {
+            "executor_text": sanitize_final_answer(f"并行计划无效：{exc}"),
+            "tool_observations": [{
+                "tool": "parallel_scheduler",
+                "args": {},
+                "result_summary": str(exc),
+                "output_files": [],
+                "status": "error",
+                "errors": ["invalid_parallel_plan"],
+            }],
+            "output_files": [],
+        }
     print(f"⚡ [Parallel] {len(steps)} steps → {len(batches)} batches")
 
     # 并行执行
@@ -668,20 +664,16 @@ def _run_parallel_execution(
         batches=batches,
         available_tool_names=available_tool_names,
         session_id=session_id,
+        dependencies=step_dependencies,
     )
-
-    # 检查是否有 racing candidate steps
-    for obs in observations:
-        if obs.get("status") == "error":
-            # 对失败的步骤尝试竞速恢复
-            pass  # racing 只在主动选择时触发
 
     # 生成执行摘要
     success_count = sum(1 for o in observations if o.get("status") == "success")
     error_count = sum(1 for o in observations if o.get("status") == "error")
+    blocked_count = sum(1 for o in observations if o.get("status") == "blocked")
     executor_text = (
         f"并行执行完成：{len(observations)} 个工具调用，"
-        f"{success_count} 成功，{error_count} 失败。"
+        f"{success_count} 成功，{error_count} 失败，{blocked_count} 阻塞。"
     )
 
     return {

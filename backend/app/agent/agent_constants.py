@@ -23,7 +23,7 @@ RESOURCE_CHECK_INTERVAL_SECONDS = 1.0    # psutil 采样间隔
 FEATURE_FLAGS = {
     "parallel_execution": True,       # Phase 1: 依赖感知并行执行
     "waterfall_racing": True,         # Phase 1: Waterfall Racing 竞速
-    "sub_agent_delegation": False,    # Phase 3: 子Agent委派（默认关闭，需更多测试）
+    "sub_agent_delegation": True,     # Phase 3: 子Agent委派
     "structured_rules_engine": True,  # Phase 5: 结构化规则引擎
     "hooks_enabled": True,            # Phase 5: Hook 系统
     "slash_commands": True,           # Phase 5: 斜杠命令

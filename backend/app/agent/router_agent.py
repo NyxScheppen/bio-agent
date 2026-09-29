@@ -8,7 +8,7 @@ from app.agent.task_prompts import ROUTER_PROMPT
 
 
 def call_json_agent(system_prompt: str, payload: Dict[str, Any]) -> Dict[str, Any]:
-    messages = [
+    messages: Any = [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": json.dumps(payload, ensure_ascii=False, default=str)}
     ]
@@ -41,7 +41,7 @@ def run_router_agent(context_pack: Dict[str, Any]) -> Dict[str, Any]:
 
     result = call_json_agent(ROUTER_PROMPT, payload)
 
-    if not result:
+    if not result or result.get("error"):
         result = {
             "task_type": "unclear",
             "subtask_type": "unknown",
@@ -76,7 +76,7 @@ def _try_resolve_command(latest_user_message: str) -> Dict[str, Any] | None:
                 "complexity": "simple",
                 "need_clarification": False,
                 "clarification_question": "",
-                "reason": f"命令: /help",
+                "reason": "命令: /help",
                 "risk_flags": [],
                 "suggested_mode": "answer_only",
                 "tool_categories": ["general"],

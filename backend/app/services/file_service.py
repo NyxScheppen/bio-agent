@@ -10,6 +10,9 @@ from app.core.config import (
 from app.db import crud
 from app.utils.file_utils import build_file_url, detect_file_type
 from app.utils.storage_contracts import (
+    create_deletion_guard,
+    discard_deletion_guard,
+    finalize_guarded_delete,
     StorageValidationError,
     normalize_upload_filename,
     publish_staged_upload,
@@ -162,7 +165,7 @@ def list_uploaded_files(session_id: str = "default"):
             if (
                 not path.is_file()
                 or path.is_symlink()
-                or path.name.startswith((".delete-", ".upload-"))
+                or path.name.lower().startswith((".delete-", ".upload-"))
             ):
                 continue
             relative_path = f"uploads/{sid}/{path.name}"
@@ -177,7 +180,7 @@ def list_uploaded_files(session_id: str = "default"):
 
 
 def delete_uploaded_file(db, session_id: str, filename: str):
-    """Delete an upload and its records, restoring the file if the DB commit fails."""
+    """Delete an upload without vacating its name before the DB transaction commits."""
     sid = validate_session_id(session_id)
     safe_filename = normalize_upload_filename(filename)
     session_dir = session_upload_dir(sid, create=False)
@@ -186,8 +189,7 @@ def delete_uploaded_file(db, session_id: str, filename: str):
     if not target.exists() or not target.is_file():
         return {"status": "error", "message": f"文件不存在: {safe_filename}"}
 
-    tombstone = session_dir / f".delete-{uuid.uuid4().hex}.tmp"
-    os.replace(target, tombstone)
+    guard = create_deletion_guard(target)
     relative_path = f"uploads/{sid}/{safe_filename}"
     try:
         deleted_records = crud.delete_file_record_by_path(
@@ -199,13 +201,17 @@ def delete_uploaded_file(db, session_id: str, filename: str):
         db.commit()
     except Exception:
         db.rollback()
-        os.replace(tombstone, target)
+        discard_deletion_guard(guard)
         raise
 
-    tombstone.unlink(missing_ok=True)
+    target_deleted = finalize_guarded_delete(target, guard)
     return {
-        "status": "success",
-        "message": "文件删除成功",
+        "status": "success" if target_deleted else "partial",
+        "message": (
+            "文件删除成功"
+            if target_deleted
+            else "数据库记录已删除，但路径已被并发替换，替换文件已保留"
+        ),
         "filename": safe_filename,
         "deleted_records": deleted_records,
     }

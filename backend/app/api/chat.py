@@ -1,6 +1,3 @@
-from pathlib import Path
-import shutil
-
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
@@ -9,90 +6,8 @@ from app.db.database import get_db
 from app.services.chat_service import handle_chat
 from app.services.session_service import delete_session_with_files
 from app.agent.context_manager import clear_session_memory
-from app.core.runtime_paths import BACKEND_ROOT, STORAGE_DIR, UPLOAD_DIR, GENERATED_DIR
-from app.utils.storage_contracts import StorageValidationError, validate_session_id
 
 router = APIRouter()
-
-def _safe_session_id(session_id: str) -> str:
-    try:
-        return validate_session_id(session_id)
-    except StorageValidationError:
-        return ""
-
-def _safe_remove_tree(path: Path) -> dict:
-    try:
-        path = Path(path)
-
-        if not path.exists():
-            return {
-                "path": str(path),
-                "deleted": False,
-                "reason": "not_exists"
-            }
-
-        if path.is_file():
-            path.unlink()
-            return {
-                "path": str(path),
-                "deleted": True,
-                "reason": "file_deleted"
-            }
-
-        if path.is_dir():
-            shutil.rmtree(path)
-            return {
-                "path": str(path),
-                "deleted": True,
-                "reason": "directory_deleted"
-            }
-
-        return {
-            "path": str(path),
-            "deleted": False,
-            "reason": "unknown_path_type"
-        }
-    except Exception as e:
-        return {
-            "path": str(path),
-            "deleted": False,
-            "reason": str(e)
-        }
-
-def _force_delete_session_files(session_id: str) -> list:
-    safe_id = _safe_session_id(session_id)
-    if not safe_id:
-        return [{
-            "path": "",
-            "deleted": False,
-            "reason": "invalid_session_id"
-        }]
-
-    legacy_upload_dir = BACKEND_ROOT / "uploads" / safe_id
-    legacy_generated_dir = BACKEND_ROOT / "generated" / safe_id
-
-    candidate_dirs = [
-        UPLOAD_DIR / safe_id,
-        GENERATED_DIR / safe_id,
-        STORAGE_DIR / "uploads" / safe_id,
-        STORAGE_DIR / "generated" / safe_id,
-        legacy_upload_dir,
-        legacy_generated_dir,
-    ]
-
-    seen = set()
-    results = []
-
-    for path in candidate_dirs:
-        normalized = str(Path(path).resolve())
-
-        if normalized in seen:
-            continue
-
-        seen.add(normalized)
-        results.append(_safe_remove_tree(path))
-
-    return results
 
 @router.post("/api/chat")
 async def chat_endpoint(request: ChatRequest, db: Session = Depends(get_db)):
@@ -124,19 +39,18 @@ def delete_chat_session_endpoint(session_id: str, db: Session = Depends(get_db))
         delete_succeeded = isinstance(result, dict) and result.get("status") == "success"
         if delete_succeeded:
             clear_session_memory(session_id)
-            force_deleted_files = _force_delete_session_files(session_id)
-        else:
-            force_deleted_files = []
 
         if isinstance(result, dict):
-            result["force_deleted_files"] = force_deleted_files
+            # Kept for response compatibility. Physical deletion is exclusively
+            # owned by the service, which has the database reference context.
+            result["force_deleted_files"] = []
             result["session_memory_cleared"] = delete_succeeded
             return result
 
         return {
             "status": "success",
             "result": result,
-            "force_deleted_files": force_deleted_files,
+            "force_deleted_files": [],
             "session_memory_cleared": True
         }
     except Exception as e:

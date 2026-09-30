@@ -1,11 +1,12 @@
-import os
-import uuid
 from pathlib import Path
 
 from app.core.paths import GENERATED_DIR, STORAGE_DIR, UPLOAD_DIR
 from app.db import crud
 from app.utils.storage_contracts import (
     artifact_relative_path_for_session,
+    create_deletion_guard,
+    discard_deletion_guard,
+    finalize_guarded_delete,
     resolve_storage_relative_path,
     StorageValidationError,
     validate_session_id,
@@ -55,8 +56,19 @@ def _stage_file_for_deletion(db, file_record, session_id: str):
         require_exists=False,
     )
     if owned_path is None and other_references == 0:
-        result["reason"] = "文件路径不属于当前会话，未删除记录"
-        return result, None, False
+        try:
+            storage_relative = target.relative_to(Path(STORAGE_DIR).resolve())
+        except ValueError:
+            storage_relative = Path()
+        is_legacy_generated = (
+            getattr(file_record, "source_type", "") == "generated"
+            and len(storage_relative.parts) == 3
+            and storage_relative.parts[0] == "generated"
+            and crud.get_session(db, storage_relative.parts[1]) is None
+        )
+        if not is_legacy_generated:
+            result["reason"] = "文件路径不属于当前会话，未删除记录"
+            return result, None, False
     if other_references > 0:
         result["reason"] = "文件仍被其他会话引用，仅删除当前会话记录"
         return result, None, True
@@ -67,23 +79,21 @@ def _stage_file_for_deletion(db, file_record, session_id: str):
         result["reason"] = "目标是目录，未删除记录"
         return result, None, False
 
-    tombstone = target.with_name(f".delete-{uuid.uuid4().hex}.tmp")
     try:
-        os.replace(target, tombstone)
+        guard = create_deletion_guard(target)
     except Exception as exc:
         result["reason"] = f"文件暂存失败：{exc}"
         return result, None, False
     result["reason"] = "等待数据库提交"
-    return result, (target, tombstone), True
+    return result, (target, guard), True
 
 
-def _restore_staged_files(staged_files):
-    for target, tombstone, _ in reversed(staged_files):
-        if tombstone.exists():
-            try:
-                os.replace(tombstone, target)
-            except OSError:
-                pass
+def _discard_deletion_guards(staged_files):
+    for _, guard, _ in reversed(staged_files):
+        try:
+            discard_deletion_guard(guard)
+        except OSError:
+            pass
 
 
 def delete_session_with_files(
@@ -137,7 +147,7 @@ def delete_session_with_files(
             failed_files.append(result)
 
     if failed_files:
-        _restore_staged_files(staged_files)
+        _discard_deletion_guards(staged_files)
         db.rollback()
         return {
             "status": "error",
@@ -162,7 +172,7 @@ def delete_session_with_files(
         db.commit()
     except Exception as exc:
         db.rollback()
-        _restore_staged_files(staged_files)
+        _discard_deletion_guards(staged_files)
         return {
             "status": "error",
             "message": f"数据库删除失败：{exc}",
@@ -173,15 +183,19 @@ def delete_session_with_files(
 
     deleted_files = []
     cleanup_failures = []
-    for target, tombstone, result in staged_files:
+    for target, guard, result in staged_files:
         try:
-            tombstone.unlink(missing_ok=True)
-            result["deleted"] = True
-            result["reason"] = "删除成功"
-            _cleanup_empty_parent_dirs(target)
-            deleted_files.append(result)
+            target_deleted = finalize_guarded_delete(target, guard)
+            if target_deleted:
+                result["deleted"] = True
+                result["reason"] = "删除成功"
+                _cleanup_empty_parent_dirs(target)
+                deleted_files.append(result)
+            else:
+                result["reason"] = "路径已被并发替换，替换文件已保留"
+                cleanup_failures.append(result)
         except OSError as exc:
-            result["reason"] = f"数据库已提交，但墓碑文件清理失败：{exc}"
+            result["reason"] = f"数据库已提交，但删除守卫清理失败：{exc}"
             cleanup_failures.append(result)
 
     stale_or_shared = [result for result in staged_results if not result["deleted"]]

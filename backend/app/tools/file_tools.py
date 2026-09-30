@@ -2,6 +2,7 @@ import os
 import csv
 import gzip
 import json
+import struct
 import zipfile
 import pandas as pd
 
@@ -10,6 +11,7 @@ from app.core.config import (
     MAX_PREVIEW_DECOMPRESSED_BYTES,
     MAX_PREVIEW_LINE_BYTES,
     MAX_PREVIEW_SCAN_BYTES,
+    MAX_PREVIEW_XLSX_ENTRIES,
 )
 from app.utils.file_resolver import resolve_file_path, debug_file_context
 
@@ -123,11 +125,75 @@ def _check_preview_line_budget(real_path, compressed: bool, lines: int) -> None:
                 break
 
 
+def _read_xlsx_central_directory(real_path) -> tuple[int, int, int]:
+    """Read bounded ZIP metadata before ZipFile allocates one ZipInfo per entry."""
+    file_size = os.path.getsize(real_path)
+    tail_size = min(file_size, 22 + 65_535)
+    with open(real_path, "rb") as stream:
+        stream.seek(file_size - tail_size)
+        tail = stream.read(tail_size)
+
+        search_end = len(tail)
+        while True:
+            index = tail.rfind(b"PK\x05\x06", 0, search_end)
+            if index < 0:
+                raise ValueError("XLSX ZIP 中央目录无效")
+            if index + 22 <= len(tail):
+                fields = struct.unpack_from("<4s4H2LH", tail, index)
+                comment_length = fields[-1]
+                if index + 22 + comment_length == len(tail):
+                    break
+            search_end = index
+
+        _, disk_number, directory_disk, entries_disk, entries, size, offset, _ = fields
+        if disk_number or directory_disk or entries_disk != entries:
+            raise ValueError("XLSX 不支持分卷 ZIP")
+        if entries == 0xFFFF or size == 0xFFFFFFFF or offset == 0xFFFFFFFF:
+            raise ValueError("XLSX 预览不支持 ZIP64 容器")
+        if entries > MAX_PREVIEW_XLSX_ENTRIES:
+            raise ValueError(
+                f"XLSX 条目数超过预览上限 {MAX_PREVIEW_XLSX_ENTRIES}"
+            )
+
+        eocd_offset = file_size - tail_size + index
+        directory_offset = eocd_offset - size
+        if directory_offset < 0 or offset > directory_offset:
+            raise ValueError("XLSX ZIP 中央目录偏移无效")
+
+        stream.seek(directory_offset)
+        remaining = size
+        actual_entries = 0
+        while remaining:
+            if remaining < 46:
+                raise ValueError("XLSX ZIP 中央目录截断")
+            header = stream.read(46)
+            if len(header) != 46 or header[:4] != b"PK\x01\x02":
+                raise ValueError("XLSX ZIP 中央目录条目无效")
+            name_length, extra_length, entry_comment_length = struct.unpack_from(
+                "<3H", header, 28
+            )
+            variable_size = name_length + extra_length + entry_comment_length
+            if 46 + variable_size > remaining:
+                raise ValueError("XLSX ZIP 中央目录条目越界")
+            stream.seek(variable_size, os.SEEK_CUR)
+            remaining -= 46 + variable_size
+            actual_entries += 1
+            if actual_entries > MAX_PREVIEW_XLSX_ENTRIES:
+                raise ValueError(
+                    f"XLSX 条目数超过预览上限 {MAX_PREVIEW_XLSX_ENTRIES}"
+                )
+
+        if actual_entries != entries:
+            raise ValueError("XLSX ZIP 条目计数不一致")
+        return actual_entries, size, offset
+
+
 def _validate_excel_archive(real_path) -> None:
     if not str(real_path).lower().endswith(".xlsx"):
         if os.path.getsize(real_path) > MAX_PREVIEW_SCAN_BYTES:
             raise ValueError("Excel 文件超过预览扫描上限")
         return
+    _read_xlsx_central_directory(real_path)
     with zipfile.ZipFile(real_path) as archive:
         expanded = sum(info.file_size for info in archive.infolist())
         if expanded > MAX_PREVIEW_DECOMPRESSED_BYTES:

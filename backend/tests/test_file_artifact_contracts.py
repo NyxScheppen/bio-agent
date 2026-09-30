@@ -75,7 +75,16 @@ def test_session_id_contract_accepts_portable_values(session_id):
 
 @pytest.mark.parametrize(
     "filename",
-    ["", ".", "CON", "CON.tar.gz", "nul.txt", "x" * 241],
+    [
+        "",
+        ".",
+        "CON",
+        "CON.tar.gz",
+        "nul.txt",
+        ".upload-report.csv",
+        ".DELETE-report.csv",
+        "x" * 241,
+    ],
 )
 def test_upload_filename_rejects_empty_reserved_or_oversized_names(filename):
     from app.utils.storage_contracts import StorageValidationError, normalize_upload_filename
@@ -237,6 +246,98 @@ def test_upload_returns_relative_url_and_delete_commit_failure_restores_file(
     assert db_session.query(StoredFile).filter_by(session_id="restore_case").count() == 1
 
 
+def test_delete_rollback_does_not_overwrite_concurrent_same_name_upload(
+    monkeypatch,
+    isolated_storage,
+    db_session,
+):
+    from app.services import file_service
+    from app.utils.storage_contracts import publish_staged_upload
+
+    original = file_service.save_upload_file(
+        db_session,
+        MemoryUpload("data.csv", b"old"),
+        "delete_race",
+    )
+    session_dir = isolated_storage[1] / "delete_race"
+    original_path = isolated_storage[0] / original["relative_path"]
+    concurrent_path = None
+
+    def fail_after_concurrent_upload():
+        nonlocal concurrent_path
+        staged = session_dir / ".upload-concurrent.tmp"
+        staged.write_bytes(b"new")
+        concurrent_path = publish_staged_upload(session_dir, "data.csv", staged)
+        raise RuntimeError("commit failed")
+
+    monkeypatch.setattr(db_session, "commit", fail_after_concurrent_upload)
+    with pytest.raises(RuntimeError, match="commit failed"):
+        file_service.delete_uploaded_file(db_session, "delete_race", "data.csv")
+
+    assert original_path.read_bytes() == b"old"
+    assert concurrent_path is not None
+    assert concurrent_path.name == "data_1.csv"
+    assert concurrent_path.read_bytes() == b"new"
+    assert not list(session_dir.glob(".delete-*.tmp"))
+
+
+def test_guarded_delete_removes_original_after_commit(
+    isolated_storage,
+    db_session,
+):
+    from app.services import file_service
+
+    uploaded = file_service.save_upload_file(
+        db_session,
+        MemoryUpload("data.csv", b"payload"),
+        "delete_success",
+    )
+    target = isolated_storage[0] / uploaded["relative_path"]
+
+    result = file_service.delete_uploaded_file(
+        db_session,
+        "delete_success",
+        "data.csv",
+    )
+
+    assert result["status"] == "success"
+    assert not target.exists()
+    assert not list(target.parent.glob(".delete-*.tmp"))
+    assert db_session.query(StoredFile).filter_by(session_id="delete_success").count() == 0
+
+
+def test_guarded_delete_preserves_path_replaced_after_commit(
+    monkeypatch,
+    isolated_storage,
+    db_session,
+):
+    from app.services import file_service
+
+    uploaded = file_service.save_upload_file(
+        db_session,
+        MemoryUpload("data.csv", b"old"),
+        "delete_replaced",
+    )
+    target = isolated_storage[0] / uploaded["relative_path"]
+    original_commit = db_session.commit
+
+    def commit_then_replace():
+        original_commit()
+        target.unlink()
+        target.write_bytes(b"new")
+
+    monkeypatch.setattr(db_session, "commit", commit_then_replace)
+    result = file_service.delete_uploaded_file(
+        db_session,
+        "delete_replaced",
+        "data.csv",
+    )
+
+    assert result["status"] == "partial"
+    assert target.read_bytes() == b"new"
+    assert not list(target.parent.glob(".delete-*.tmp"))
+
+
 def test_listing_missing_session_does_not_create_directory(isolated_storage):
     from app.services.file_service import list_uploaded_files
 
@@ -311,6 +412,10 @@ def test_storage_contract_rejects_symlink_artifacts(
     assert resolve_storage_relative_path(
         "generated/link.txt",
         require_exists=True,
+    ) is None
+    assert resolve_storage_relative_path(
+        "generated/.UPLOAD-hidden.tmp",
+        require_exists=False,
     ) is None
 
 
@@ -529,6 +634,25 @@ def test_preview_budgets_bound_plain_gzip_and_xlsx_work(monkeypatch, tmp_path):
         file_tools._validate_excel_archive(workbook)
 
 
+def test_xlsx_entry_budget_is_checked_before_zipfile_allocation(monkeypatch, tmp_path):
+    from app.tools import file_tools
+
+    workbook = tmp_path / "many_entries.xlsx"
+    with zipfile.ZipFile(workbook, "w") as archive:
+        for index in range(3):
+            archive.writestr(f"xl/worksheets/sheet{index}.xml", b"x")
+
+    monkeypatch.setattr(file_tools, "MAX_PREVIEW_XLSX_ENTRIES", 2)
+
+    class UnexpectedZipFile:
+        def __init__(self, *args, **kwargs):
+            raise AssertionError("ZipFile must not be constructed before entry validation")
+
+    monkeypatch.setattr(file_tools.zipfile, "ZipFile", UnexpectedZipFile)
+    with pytest.raises(ValueError, match="条目数"):
+        file_tools._validate_excel_archive(workbook)
+
+
 def test_generated_only_cleanup_preserves_upload_and_session(
     isolated_storage,
     db_session,
@@ -597,3 +721,65 @@ def test_shared_legacy_artifact_is_not_physically_deleted(
     assert db_session.query(ChatSession).filter_by(session_id="legacy_a").first() is None
     assert db_session.query(StoredFile).filter_by(session_id="legacy_a").count() == 0
     assert db_session.query(StoredFile).filter_by(session_id="legacy_b").count() == 1
+
+
+def test_unshared_legacy_generated_artifact_does_not_block_session_delete(
+    isolated_storage,
+    db_session,
+):
+    from app.db import crud
+    from app.services.session_service import delete_session_with_files
+
+    _, _, generated = isolated_storage
+    legacy = generated / "legacy_job_123" / "report.csv"
+    legacy.parent.mkdir(parents=True)
+    legacy.write_text("legacy", encoding="utf-8")
+
+    crud.create_session(db_session, "legacy_owner")
+    crud.save_file_record(
+        db_session,
+        "legacy_owner",
+        "report.csv",
+        "generated/legacy_job_123/report.csv",
+        "table",
+        "generated",
+    )
+
+    result = delete_session_with_files(db_session, "legacy_owner")
+
+    assert result["status"] == "success"
+    assert not legacy.exists()
+    assert db_session.query(ChatSession).filter_by(session_id="legacy_owner").first() is None
+
+
+def test_api_session_delete_preserves_file_referenced_by_another_session(
+    isolated_storage,
+    db_session,
+):
+    from app.api.chat import delete_chat_session_endpoint
+    from app.db import crud
+
+    _, _, generated = isolated_storage
+    shared = generated / "victim" / "job" / "report.csv"
+    shared.parent.mkdir(parents=True)
+    shared.write_text("shared", encoding="utf-8")
+
+    for session_id in ("victim", "survivor"):
+        crud.create_session(db_session, session_id)
+        crud.save_file_record(
+            db_session,
+            session_id,
+            "report.csv",
+            "generated/victim/job/report.csv",
+            "table",
+            "generated",
+        )
+
+    result = delete_chat_session_endpoint("victim", db_session)
+
+    assert result["status"] == "success"
+    assert result["force_deleted_files"] == []
+    assert shared.read_text(encoding="utf-8") == "shared"
+    assert db_session.query(ChatSession).filter_by(session_id="victim").first() is None
+    assert db_session.query(StoredFile).filter_by(session_id="victim").count() == 0
+    assert db_session.query(StoredFile).filter_by(session_id="survivor").count() == 1

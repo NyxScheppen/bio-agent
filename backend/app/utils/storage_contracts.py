@@ -2,6 +2,7 @@
 
 import os
 import re
+import uuid
 from pathlib import Path, PurePosixPath
 from typing import Iterable
 
@@ -38,6 +39,8 @@ def normalize_upload_filename(filename: str) -> str:
 
     if not name or name in {".", ".."}:
         raise StorageValidationError("上传文件名不能为空")
+    if name.lower().startswith((".upload-", ".delete-")):
+        raise StorageValidationError("上传文件名使用了内部保留前缀")
     if len(name.encode("utf-8")) > MAX_FILENAME_BYTES:
         raise StorageValidationError(
             f"上传文件名过长，UTF-8 编码后不能超过 {MAX_FILENAME_BYTES} 字节"
@@ -79,10 +82,7 @@ def resolve_storage_relative_path(
     pure = PurePosixPath(raw)
     if any(part in {"", ".", ".."} for part in pure.parts):
         return None
-    if any(
-        part.startswith(".upload-") or part.startswith(".delete-")
-        for part in pure.parts
-    ):
+    if any(part.lower().startswith((".upload-", ".delete-")) for part in pure.parts):
         return None
     roots = {str(root).strip("/") for root in allowed_roots}
     if not pure.parts or pure.parts[0] not in roots:
@@ -151,6 +151,29 @@ def is_dangerous_inline_file(path: Path | str) -> bool:
         ".html", ".htm", ".xhtml", ".svg", ".xml",
         ".js", ".mjs", ".css",
     }
+
+
+def create_deletion_guard(target: Path) -> Path:
+    """Pin a file inode without vacating its public name during a DB transaction."""
+    guard = target.with_name(f".delete-{uuid.uuid4().hex}.tmp")
+    os.link(target, guard)
+    return guard
+
+
+def discard_deletion_guard(guard: Path) -> None:
+    guard.unlink(missing_ok=True)
+
+
+def finalize_guarded_delete(target: Path, guard: Path) -> bool:
+    """Delete the guarded entity without deleting a concurrently replaced path."""
+    public_entity_removed = not target.exists()
+    try:
+        if target.exists() and guard.exists() and os.path.samefile(target, guard):
+            target.unlink()
+            public_entity_removed = True
+        return public_entity_removed
+    finally:
+        guard.unlink(missing_ok=True)
 
 
 def publish_staged_upload(

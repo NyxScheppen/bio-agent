@@ -45,7 +45,7 @@ Skill Router 使用三个评分维度：
 |---|---:|---|
 | task/subtask | 0.45 | Router 类型与 Skill 声明的匹配程度 |
 | keyword | 0.35 | 用户消息中的中英文触发词 |
-| input | 0.20 | 上传或明确提到的文件名与 required inputs 的匹配 |
+| input | 0.20 | 结构化上传附件名与 required inputs 的匹配 |
 
 implemented 和 partial 状态分别提供排序加分，但状态加分不能创建匹配。候选必须至少具备一种真实证据：
 
@@ -58,16 +58,19 @@ implemented 和 partial 状态分别提供排序加分，但状态加分不能�
 
 同分时使用 Skill `priority`，再使用 `skill_id`，因此结果不依赖 YAML 文件遍历顺序。
 
-`general`、`bioinformatics`、`file_processing`、`unclear` 和 `unknown` 属于宽泛 task type，不能单独作为匹配证据。它们必须与具体 subtask、关键词或输入文件证据组合使用。输入文件证据只在 Router task type 与 Skill 声明兼容时生效，避免会话中遗留的上传文件劫持无关的新请求。
+`general`、`bioinformatics`、`file_processing`、`unclear` 和 `unknown` 属于宽泛 task type，不能单独作为匹配证据，也不能仅依靠输入文件补足证据。它们必须与具体 subtask 或关键词组合使用。输入文件证据只在具体 Router task type 与 Skill 声明兼容时生效，避免会话中遗留的上传文件劫持无关的新请求。
 
 ## 上传文件参与路由
 
-聊天服务把上传文件写入 system context。Bio Agent 从摘要、最新消息和近期消息中提取文件名，只把 basename 传给 Skill Router。
+聊天服务把当前会话的附件对象通过 `available_files` 结构化参数传给 Bio Agent。Bio Agent 只读取这些附件对象的 `filename`、`name` 或 `relative_path`，并把 basename 传给 Skill Router。摘要、用户消息和 system context 中出现的文件名文本都不属于上传证据。
 
 例如：
 
-```text
-文件名: counts.csv | 相对路径: uploads/session/counts.csv
+```json
+{
+  "filename": "counts.csv",
+  "relative_path": "uploads/session/counts.csv"
+}
 ```
 
 会产生 `available_files=["counts.csv"]`。`count_file` 可通过 `count` 别名命中；`data_file` 不会使用过宽的 `data` 别名命中任意 metadata 文件。
@@ -83,6 +86,8 @@ implemented 和 partial 状态分别提供排序加分，但状态加分不能�
 - `TOOL_META`：类别、标签、超时和恢复元数据。
 
 工具名必须唯一。第二次注册同名工具会抛出 `DuplicateToolError`，避免 callable 被覆盖但旧 Schema 仍残留。
+
+`run_r_analysis` 是注册领域分析工具使用的内部执行函数，不写入上述三个 Agent 工具注册结构。任意 R 代码与宿主进程具有相同权限，不能依靠 R 函数遮蔽形成安全沙箱，因此模型不能直接调用该函数。
 
 Skill 工具策略如下：
 

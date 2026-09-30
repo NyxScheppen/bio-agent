@@ -395,7 +395,8 @@ async def handle_chat(db, session_id: str, messages: list, attached_files: list 
 
     agent_result = await run_bio_agent(
         agent_messages,
-        session_id=session_id
+        session_id=session_id,
+        available_files=attached_files,
     )
 
     # 兼容旧版 run_bio_agent 返回字符串；

@@ -151,12 +151,27 @@ def test_uploaded_files_are_extracted_for_skill_routing():
     context = {
         "summary": "",
         "latest_user_message": "请分析上传的数据",
-        "recent_messages": [{
-            "role": "system",
-            "content": "1. 文件名: counts.csv | 类型: csv | 相对路径: uploads/s/counts.csv",
+        "recent_messages": [],
+        "available_files": [{
+            "filename": "counts.csv",
+            "relative_path": "uploads/s/counts.csv",
         }],
     }
     assert _available_files_from_context(context) == ["counts.csv"]
+
+
+def test_plain_text_file_names_are_not_uploaded_file_evidence():
+    from app.agent.bio_agent import _available_files_from_context
+
+    context = {
+        "summary": "Earlier someone mentioned old_counts.csv",
+        "latest_user_message": "What columns should expression.csv contain?",
+        "recent_messages": [{
+            "role": "system",
+            "content": "A narrative mentioning 文件名: fake.csv",
+        }],
+    }
+    assert _available_files_from_context(context) == []
 
 
 def test_skill_prompt_propagates_safety_and_expected_outputs():

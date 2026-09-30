@@ -128,6 +128,7 @@ def _has_match_evidence(
 
     return bool(
         skill.required_inputs
+        and normalized_task not in generic_task_types
         and normalized_task in {t.lower() for t in skill.task_types}
         and _score_inputs(skill, available_files) > 0
     )

@@ -1,9 +1,13 @@
+import ipaddress
 import json
 import re
 import requests
+import socket
+import ssl
+import urllib3
 import xml.etree.ElementTree as ET
 from pathlib import Path
-from urllib.parse import quote, urlparse
+from urllib.parse import quote, urljoin, urlparse, urlsplit
 
 from app.agent.tool_registry import register_tool
 from app.core.paths import GENERATED_DIR
@@ -16,12 +20,160 @@ REQUEST_HEADERS = {
     "User-Agent": "BioAI-Agent/1.0 (iGEM literature tool)"
 }
 
+MAX_PDF_BYTES = 50 * 1024 * 1024
+MAX_PDF_REDIRECTS = 5
+
 def _is_http_url(url: str) -> bool:
-    """校验 URL 是否为 http/https 协议，防止 SSRF（file://、非 http 重定向等）。"""
+    """仅校验 URL 协议；SSRF 防护由下载路径的公网地址校验负责。"""
     try:
         return urlparse(url).scheme in ("http", "https")
     except ValueError:
         return False
+
+
+def _validate_public_download_url(url: str):
+    """解析并校验下载目标，返回 URL parts 和固定连接使用的公网 IP。"""
+    try:
+        parts = urlsplit(str(url or "").strip())
+        parsed_port = parts.port
+    except ValueError as exc:
+        raise ValueError("下载链接格式无效") from exc
+
+    if parts.scheme not in {"http", "https"} or not parts.hostname:
+        raise ValueError("仅支持有效的 http/https 下载链接")
+    if parsed_port is not None and parsed_port < 1:
+        raise ValueError("下载链接端口无效")
+    if parts.username is not None or parts.password is not None:
+        raise ValueError("下载链接不允许包含用户凭据")
+
+    port = parsed_port or (443 if parts.scheme == "https" else 80)
+
+    hostname = parts.hostname.rstrip(".").encode("idna").decode("ascii")
+    if not hostname or hostname.lower() == "localhost" or hostname.lower().endswith(".localhost"):
+        raise ValueError("下载目标不是公网地址")
+
+    try:
+        addresses = [ipaddress.ip_address(hostname)]
+    except ValueError:
+        try:
+            records = socket.getaddrinfo(
+                hostname.encode("idna").decode("ascii"),
+                port,
+                type=socket.SOCK_STREAM,
+            )
+        except (OSError, UnicodeError) as exc:
+            raise ValueError("下载目标无法解析") from exc
+        addresses = []
+        for record in records:
+            try:
+                address = ipaddress.ip_address(record[4][0].split("%", 1)[0])
+            except ValueError:
+                continue
+            if address not in addresses:
+                addresses.append(address)
+
+    if not addresses or any(not address.is_global for address in addresses):
+        raise ValueError("下载目标解析到了非公网地址")
+
+    return parts, str(addresses[0])
+
+
+def _request_pinned_url(parts, pinned_ip: str, timeout: int = 30):
+    """连接已校验的 IP，同时保留原主机名用于 Host、SNI 和证书校验。"""
+    hostname = parts.hostname.rstrip(".").encode("idna").decode("ascii")
+    port = parts.port or (443 if parts.scheme == "https" else 80)
+    default_port = 443 if parts.scheme == "https" else 80
+    host_value = f"[{hostname}]" if ":" in hostname else hostname
+    if port != default_port:
+        host_value = f"{host_value}:{port}"
+
+    request_target = parts.path or "/"
+    if parts.query:
+        request_target += f"?{parts.query}"
+
+    pool_kwargs = {
+        "host": pinned_ip,
+        "port": port,
+        "timeout": urllib3.Timeout(connect=timeout, read=timeout),
+        "retries": False,
+    }
+    if parts.scheme == "https":
+        pool = urllib3.HTTPSConnectionPool(
+            **pool_kwargs,
+            ssl_context=ssl.create_default_context(),
+            server_hostname=hostname,
+            assert_hostname=hostname,
+        )
+    else:
+        pool = urllib3.HTTPConnectionPool(**pool_kwargs)
+
+    response = None
+    try:
+        response = pool.urlopen(
+            "GET",
+            request_target,
+            headers={
+                **REQUEST_HEADERS,
+                "Host": host_value,
+                "Accept": "application/pdf",
+                "Accept-Encoding": "identity",
+            },
+            redirect=False,
+            preload_content=False,
+        )
+        headers = dict(response.headers)
+        if response.status in {301, 302, 303, 307, 308}:
+            return response.status, headers, b""
+
+        content_length = headers.get("Content-Length") or headers.get("content-length")
+        if content_length:
+            try:
+                declared_size = int(content_length)
+            except (TypeError, ValueError):
+                declared_size = 0
+            if declared_size > MAX_PDF_BYTES:
+                raise ValueError("PDF 文件超过允许的大小上限")
+
+        body = bytearray()
+        while True:
+            chunk = response.read(64 * 1024)
+            if not chunk:
+                break
+            body.extend(chunk)
+            if len(body) > MAX_PDF_BYTES:
+                raise ValueError("PDF 文件超过允许的大小上限")
+        return response.status, headers, bytes(body)
+    finally:
+        if response is not None:
+            response.close()
+        pool.close()
+
+
+def _download_public_pdf(pdf_url: str, timeout: int = 30):
+    """逐跳校验重定向并下载 PDF；每一跳都重新解析且固定公网 IP。"""
+    current_url = pdf_url
+    for redirect_count in range(MAX_PDF_REDIRECTS + 1):
+        parts, pinned_ip = _validate_public_download_url(current_url)
+        status, headers, body = _request_pinned_url(parts, pinned_ip, timeout=timeout)
+
+        if status in {301, 302, 303, 307, 308}:
+            location = headers.get("Location") or headers.get("location")
+            if not location:
+                raise ValueError("下载目标返回了无 Location 的重定向")
+            if redirect_count >= MAX_PDF_REDIRECTS:
+                raise ValueError("PDF 下载重定向次数过多")
+            current_url = urljoin(current_url, location)
+            continue
+
+        if status >= 400:
+            raise ValueError(f"PDF 下载失败，HTTP 状态码: {status}")
+        if status < 200 or status >= 300:
+            raise ValueError(f"PDF 下载返回了不支持的 HTTP 状态码: {status}")
+        if not body.startswith(b"%PDF-"):
+            raise ValueError("目标响应不是有效 PDF")
+        return body, current_url
+
+    raise ValueError("PDF 下载重定向次数过多")
 
 def _safe_get(url: str, params: dict = None, timeout: int = 20):
     resp = requests.get(url, params=params, timeout=timeout, headers=REQUEST_HEADERS)
@@ -573,7 +725,7 @@ def download_open_access_pdf(identifier_or_url: str, filename_hint: str = ""):
         pdf_url = ""
 
         # 1. 直接传 PDF URL
-        if identifier_or_url.lower().startswith("http") and identifier_or_url.lower().endswith(".pdf"):
+        if _is_http_url(identifier_or_url):
             pdf_url = identifier_or_url
 
         # 2. PMCID
@@ -608,26 +760,10 @@ def download_open_access_pdf(identifier_or_url: str, filename_hint: str = ""):
 
         save_path = LITERATURE_DIR / safe_name
 
-        resp = requests.get(pdf_url, timeout=30, headers=REQUEST_HEADERS)
-        resp.raise_for_status()
-
-        if not _is_http_url(resp.url):
-            return json.dumps({
-                "status": "error",
-                "message": f"重定向到了非 http/https 地址，已拦截: {resp.url}"
-            }, ensure_ascii=False)
-
-        content_type = resp.headers.get("Content-Type", "").lower()
-        if "pdf" not in content_type and not pdf_url.lower().endswith(".pdf"):
-            # 有些站点会重定向到 HTML 错误页
-            if not resp.content.startswith(b"%PDF"):
-                return json.dumps({
-                    "status": "error",
-                    "message": f"目标不是有效 PDF: {pdf_url}"
-                }, ensure_ascii=False)
+        pdf_content, final_url = _download_public_pdf(pdf_url, timeout=30)
 
         with open(save_path, "wb") as f:
-            f.write(resp.content)
+            f.write(pdf_content)
 
         relative_path = f"generated/literature/{save_path.name}"
         url = build_file_url(relative_path)
@@ -637,7 +773,8 @@ def download_open_access_pdf(identifier_or_url: str, filename_hint: str = ""):
             "filename": save_path.name,
             "relative_path": relative_path,
             "url": url,
-            "pdf_url": pdf_url
+            "pdf_url": pdf_url,
+            "final_url": final_url
         }, ensure_ascii=False)
 
     except Exception as e:

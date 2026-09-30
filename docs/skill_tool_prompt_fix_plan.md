@@ -69,7 +69,7 @@
 ## 验收标准
 
 - Skill ID 全局唯一，当前稳定加载 54 个 Skill。
-- `TOOL_REGISTRY`、`TOOLS_SCHEMA`、`TOOL_META` 名称一致，当前稳定注册 37 个工具。
+- `TOOL_REGISTRY`、`TOOLS_SCHEMA`、`TOOL_META` 名称一致；移除任意 R 代码入口后当前稳定注册 36 个 Agent 工具。
 - 所有 Skill 的 allowlist/denylist 均只引用真实工具。
 - 无关天气请求不再选择任何生信 Skill。
 - 畸形结构化输出不会导致 AttributeError 或进入工具执行层。

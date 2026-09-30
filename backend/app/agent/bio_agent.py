@@ -1,6 +1,5 @@
 import asyncio
 import json
-import re
 from typing import Any, Dict, List, Optional
 
 from app.core.config import MODEL_NAME
@@ -94,25 +93,20 @@ def _normalize_execution_mode(value: Any) -> str:
 
 
 def _available_files_from_context(context_pack: Dict[str, Any]) -> List[str]:
-    """Extract uploaded or explicitly mentioned file names from the context pack."""
-    texts = [
-        str(context_pack.get("summary", "")),
-        str(context_pack.get("latest_user_message", "")),
-    ]
-    texts.extend(
-        str(message.get("content", ""))
-        for message in context_pack.get("recent_messages", [])
-        if isinstance(message, dict)
-    )
-    patterns = (
-        r"文件名\s*:\s*([^|\r\n]+)",
-        r"\b[^\s|<>:\"']+\.(?:csv|tsv|txt|xlsx|xls|gz|zip|rds|h5ad|mtx)\b",
-    )
-    found: List[str] = []
-    for text in texts:
-        for pattern in patterns:
-            found.extend(match.strip() for match in re.findall(pattern, text, flags=re.I))
-    normalized = [name.replace("\\", "/").rsplit("/", 1)[-1] for name in found if name]
+    """Extract file names only from trusted, structured attachment metadata."""
+    values = context_pack.get("available_files", [])
+    if not isinstance(values, (list, tuple)):
+        return []
+
+    normalized: List[str] = []
+    for value in values:
+        if isinstance(value, dict):
+            name = value.get("filename") or value.get("name") or value.get("relative_path")
+        else:
+            name = value
+        basename = str(name or "").strip().replace("\\", "/").rsplit("/", 1)[-1]
+        if basename:
+            normalized.append(basename)
     return list(dict.fromkeys(normalized))
 
 
@@ -190,6 +184,7 @@ def _run_delegated_tasks(
 def _run_bio_agent_sync(
     history_messages: list,
     session_id: str = "",
+    available_files: Optional[List[Any]] = None,
 ) -> Dict[str, Any]:
     """
     Multi-Agent 主入口：
@@ -207,6 +202,7 @@ def _run_bio_agent_sync(
         history_messages,
         session_id=session_id
     )
+    context_pack["available_files"] = list(available_files or [])
 
     context_pack = enrich_context_with_session_memory(
         context_pack=context_pack,
@@ -379,6 +375,7 @@ def _run_bio_agent_sync(
 async def run_bio_agent(
     history_messages: list,
     session_id: str = "",
+    available_files: Optional[List[Any]] = None,
 ) -> Dict[str, Any]:
     """在线程中运行同步 Agent/工具链，避免阻塞 FastAPI 事件循环。"""
     try:
@@ -386,6 +383,7 @@ async def run_bio_agent(
             _run_bio_agent_sync,
             history_messages,
             session_id,
+            available_files,
         )
     finally:
         if FEATURE_FLAGS.get("hooks_enabled", False):

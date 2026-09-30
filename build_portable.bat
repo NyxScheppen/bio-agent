@@ -102,7 +102,9 @@ echo ---- Step 4: Copy backend...
 
 robocopy "%PROJECT_ROOT%\backend" "%RELEASE_DIR%\backend" /E /NFL /NDL /NJH /NJS ^
     /XD "__pycache__" "storage" "db_data" "tests" ".git" ^
-    /XF "*.pyc" "*.pyo" ".env" "*.db" "*.sqlite" "*.sqlite3"
+    /XF "*.pyc" "*.pyo" ".env" ".env.*" "*.db" "*.sqlite" "*.sqlite3" ^
+        "*.pem" "*.key" "*.pfx" "*.p12" "*.ppk" "*.jks" "*.keystore" "*.kdbx" ^
+        "id_rsa" "id_ed25519" ".npmrc" ".pypirc" "*secret*" "*credential*" "service-account*.json"
 
 set "ROBO_ERR=%ERRORLEVEL%"
 if %ROBO_ERR% GEQ 8 (
@@ -111,7 +113,7 @@ REM [skipped] pause
     exit /b 1
 )
 
-echo [OK] backend copied (__pycache__, storage, db_data, tests, .env excluded^).
+echo [OK] backend copied (runtime data, local env files, credentials, and private keys excluded^).
 echo.
 
 REM -- Step 5: Create storage and db_data dirs in release -----

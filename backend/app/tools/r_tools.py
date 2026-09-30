@@ -3,7 +3,6 @@ import uuid
 import subprocess
 from pathlib import Path
 
-from app.agent.tool_registry import register_tool
 from app.core.runtime_paths import (
     PROJECT_ROOT,
     STORAGE_DIR,
@@ -83,33 +82,13 @@ def collect_output_files(job_dir: Path):
     return files
 
 
-@register_tool(
-    name="run_r_analysis",
-    description="执行 R 代码进行生信分析。系统会自动创建本次任务输出目录，并返回生成文件列表。",
-    parameters={
-        "type": "object",
-        "properties": {
-            "r_code": {
-                "type": "string",
-                "description": "纯 R 代码"
-            },
-            "timeout": {
-                "type": "integer",
-                "description": "超时时间（秒），默认 300",
-                "default": 300
-            },
-            "job_subdir": {
-                "type": "string",
-                "description": "可选，输出子目录名；为空时自动生成 job_id",
-                "default": ""
-            }
-        },
-        "required": ["r_code"]
-    },
-    timeout=3600,
-    max_memory_mb=8192,
-)
 def run_r_analysis(r_code: str, timeout: int = 300, job_subdir: str = None):
+    """Execute trusted, application-generated R code for registered domain tools.
+
+    This function is intentionally not registered as an Agent tool. R code has the
+    privileges of the R process, so in-process function masking is not a security
+    sandbox for model- or user-supplied arbitrary code.
+    """
     rscript = find_rscript()
 
     if not rscript:
@@ -201,40 +180,50 @@ save_to_job <- function(filename) {{
 
 setwd(GENERATED_DIR)
 
-# ===== 安全加固：防 prompt 注入（本地工具加固暴露面）=====
-
-# 1) 遮蔽 shell 执行原语：分析脚本禁止直接调 system / shell / system2 / shell.exec
-system <- function(...) stop("安全限制：分析脚本禁止执行 shell 命令 (system)")
-shell <- function(...) stop("安全限制：分析脚本禁止执行 shell 命令 (shell)")
-system2 <- function(...) stop("安全限制：分析脚本禁止执行 shell 命令 (system2)")
-shell.exec <- function(...) stop("安全限制：分析脚本禁止执行 shell 命令 (shell.exec)")
-
-# 2) 限制 file() 只能访问 storage 内文件，阻断 readLines("/abs/.env") 这类越界读取
-.orig_file <- base::file
-.allow_roots <- unique(c(
-  Sys.getenv(c("STORAGE_DIR", "UPLOAD_DIR", "GENERATED_ROOT", "GENERATED_DIR", "R_LIBS_USER")),
-  .libPaths(),
-  tempdir(),
-  R.home()
-))
-.allow_roots <- .allow_roots[nzchar(.allow_roots)]
-.allow_roots <- normalizePath(.allow_roots, winslash = "/", mustWork = FALSE)
-
-.file_safe <- function(description = "", ...) {{
-  if (is.character(description) && length(description) == 1 && nzchar(description)
-      && !grepl("^[a-zA-Z][a-zA-Z0-9+.-]*://", description)) {{
-    p <- normalizePath(description, winslash = "/", mustWork = FALSE)
-    if (!any(startsWith(p, .allow_roots))) {{
-      stop("安全限制：禁止访问 storage 目录外的文件: ", description)
-    }}
-  }}
-  .orig_file(description, ...)
-}}
+# ===== 纵深防护：这里只保护应用生成的 R 模板，不构成任意代码沙箱 =====
 
 .base_ns <- asNamespace("base")
+.blocked_process_call <- function(...) stop("安全限制：分析模板禁止执行外部命令")
+for (.name in c("system", "system2", "shell", "shell.exec")) {{
+  if (exists(.name, envir = .base_ns, inherits = FALSE)) {{
+    unlockBinding(.name, .base_ns)
+    assign(.name, .blocked_process_call, envir = .base_ns)
+    lockBinding(.name, .base_ns)
+  }}
+}}
+
+.file_guard <- local({{
+  original_file <- base::file
+  allow_roots <- unique(c(
+    Sys.getenv(c("STORAGE_DIR", "UPLOAD_DIR", "GENERATED_ROOT", "GENERATED_DIR", "R_LIBS_USER")),
+    .libPaths(),
+    tempdir(),
+    R.home()
+  ))
+  allow_roots <- allow_roots[nzchar(allow_roots)]
+  allow_roots <- normalizePath(allow_roots, winslash = "/", mustWork = FALSE)
+
+  function(description = "", ...) {{
+    if (is.character(description) && length(description) == 1 && nzchar(description)
+        && !grepl("^[a-zA-Z][a-zA-Z0-9+.-]*://", description)) {{
+      p <- normalizePath(description, winslash = "/", mustWork = FALSE)
+      in_root <- vapply(
+        allow_roots,
+        function(root) identical(p, root) || startsWith(p, paste0(root, "/")),
+        logical(1)
+      )
+      if (!any(in_root)) {{
+        stop("安全限制：禁止访问 storage 目录外的文件: ", description)
+      }}
+    }}
+    original_file(description, ...)
+  }}
+}})
+
 unlockBinding("file", .base_ns)
-assign("file", .file_safe, envir = .base_ns)
+assign("file", .file_guard, envir = .base_ns)
 lockBinding("file", .base_ns)
+rm(.file_guard, .blocked_process_call, .base_ns, .name)
 '''
 
     full_r_code = r_prelude + "\n\n" + str(r_code or "")

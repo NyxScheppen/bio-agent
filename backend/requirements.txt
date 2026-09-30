@@ -2,11 +2,13 @@ fastapi
 uvicorn
 python-multipart
 pydantic
+cloudpickle>=3.0.0
 sqlalchemy
 python-dotenv
 openai
 pandas
 requests
+psutil>=5.9.0
 numpy
 scikit-learn
 matplotlib

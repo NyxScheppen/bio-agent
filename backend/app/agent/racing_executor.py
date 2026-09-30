@@ -19,6 +19,7 @@ Waterfall Racing 竞速执行器 (Phase 1.2).
 
 import concurrent.futures
 import inspect
+import threading
 import time
 from typing import Any, Dict, List, Optional
 
@@ -140,10 +141,12 @@ def race_tools(
         max_workers=max(1, min(max_workers, len(valid_tools)))
     )
     future_to_name: Dict[concurrent.futures.Future, str] = {}
+    cancellation_events: Dict[concurrent.futures.Future, threading.Event] = {}
     try:
         future_to_name = {}
         for name in valid_tools:
             func = TOOL_REGISTRY[name]
+            cancellation_event = threading.Event()
             future = executor.submit(
                 run_tool_with_lifecycle,
                 tool_name=name,
@@ -151,8 +154,10 @@ def race_tools(
                 function_args=dict(function_args),
                 session_id=session_id,
                 timeout_override=timeout,
+                cancellation_event=cancellation_event,
             )
             future_to_name[future] = name
+            cancellation_events[future] = cancellation_event
 
         for future in concurrent.futures.as_completed(
             future_to_name,
@@ -198,7 +203,8 @@ def race_tools(
             elif future.cancel():
                 status = "cancelled"
             else:
-                status = "running"
+                cancellation_events[future].set()
+                status = "cancelling"
             result.losers.append({
                 "tool_name": name,
                 "status": status,

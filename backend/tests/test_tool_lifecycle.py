@@ -6,7 +6,7 @@ Run:
     .venv/Scripts/python.exe backend/tests/test_tool_lifecycle.py
 """
 
-import json
+import subprocess
 import os
 import sys
 import tempfile
@@ -31,13 +31,44 @@ def _assert_in(item, container, msg=""):
     _assert(item in container, f"{msg}: {item!r} not in {container!r}")
 
 
+def _delayed_file_write(marker_path: str, delay: float) -> dict:
+    time.sleep(delay)
+    Path(marker_path).write_text("late side effect", encoding="utf-8")
+    return {"status": "success"}
+
+
+def _spawn_descendant_and_wait(pid_path: str, delay: float) -> dict:
+    child = subprocess.Popen([
+        sys.executable,
+        "-c",
+        "import sys, time; time.sleep(float(sys.argv[1]))",
+        str(delay),
+    ])
+    Path(pid_path).write_text(str(child.pid), encoding="utf-8")
+    time.sleep(delay)
+    return {"status": "success"}
+
+
+class _UnserializableResult:
+    def __reduce__(self):
+        raise TypeError("cannot serialize result")
+
+
+def _return_unserializable_result():
+    return _UnserializableResult()
+
+
+def _exit_without_result():
+    os._exit(7)
+
+
 # ============================================================
 # test_create_tool_context
 # ============================================================
 
 def test_create_tool_context():
     """创建 ToolExecutionContext 并验证字段。"""
-    from app.agent.tool_context import create_tool_context, ToolExecutionContext
+    from app.agent.tool_context import create_tool_context
 
     ctx = create_tool_context(
         tool_name="test_tool",
@@ -117,7 +148,7 @@ def test_run_tool_with_lifecycle_success():
     _assert_equal(result.output_files[0].name, "result.csv")
     _assert_equal(result.provenance.tool_name, "my_tool")
     _assert(result.provenance.runtime_seconds is not None, "runtime should be set")
-    _assert(result.provenance.runtime_seconds >= 0, "runtime should be >= 0")
+    _assert((result.provenance.runtime_seconds or 0) >= 0, "runtime should be >= 0")
     _assert(result.provenance.started_at is not None)
     _assert(result.provenance.finished_at is not None)
     _assert_equal(result.summary.get("up_genes"), 150)
@@ -133,11 +164,8 @@ def test_run_tool_with_lifecycle_injects_job_dir():
     """工具函数接受 job_dir 参数时应自动注入。"""
     from app.agent.tool_runner import run_tool_with_lifecycle
 
-    received_job_dir = []
-
     def my_tool(file_path: str, job_dir: str = ""):
-        received_job_dir.append(job_dir)
-        return {"status": "success"}
+        return {"status": "success", "received_job_dir": job_dir}
 
     result = run_tool_with_lifecycle(
         tool_name="inject_test",
@@ -147,9 +175,9 @@ def test_run_tool_with_lifecycle_injects_job_dir():
     )
 
     _assert_equal(result.status, "success")
-    _assert(len(received_job_dir) == 1, "job_dir should be injected")
-    _assert(received_job_dir[0] != "", "injected job_dir should not be empty")
-    _assert(Path(received_job_dir[0]).exists(), "injected job_dir should exist")
+    received_job_dir = result.summary.get("received_job_dir", "")
+    _assert(received_job_dir != "", "injected job_dir should not be empty")
+    _assert(Path(received_job_dir).exists(), "injected job_dir should exist")
 
     print("[PASS] test_run_tool_with_lifecycle_injects_job_dir")
 
@@ -158,11 +186,8 @@ def test_run_tool_with_lifecycle_injects_session_id():
     """工具函数接受 session_id 参数时应自动注入。"""
     from app.agent.tool_runner import run_tool_with_lifecycle
 
-    received_sid = []
-
     def my_tool(file_path: str, session_id: str = ""):
-        received_sid.append(session_id)
-        return {"status": "success"}
+        return {"status": "success", "received_session_id": session_id}
 
     result = run_tool_with_lifecycle(
         tool_name="sid_test",
@@ -172,7 +197,7 @@ def test_run_tool_with_lifecycle_injects_session_id():
     )
 
     _assert_equal(result.status, "success")
-    _assert_equal(received_sid[0], "abc123")
+    _assert_equal(result.summary.get("received_session_id"), "abc123")
 
     print("[PASS] test_run_tool_with_lifecycle_injects_session_id")
 
@@ -228,6 +253,80 @@ def test_run_tool_with_lifecycle_error_dict():
     _assert(len(result.errors) > 0)
 
     print("[PASS] test_run_tool_with_lifecycle_error_dict")
+
+
+def test_process_timeout_stops_late_side_effect():
+    """硬超时后，工具执行体不能继续写入迟到副作用。"""
+    from app.agent.tool_process import run_tool_in_subprocess
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        marker_path = Path(tmpdir) / "late.txt"
+        outcome = run_tool_in_subprocess(
+            _delayed_file_write,
+            {"marker_path": str(marker_path), "delay": 2.0},
+            timeout_seconds=0.5,
+        )
+        _assert(outcome.timed_out, "execution should time out")
+        _assert(outcome.tree_terminated, "worker process tree should be terminated")
+        time.sleep(0.7)
+        _assert(not marker_path.exists(), "timed-out tool produced a late side effect")
+
+    print("[PASS] test_process_timeout_stops_late_side_effect")
+
+
+def test_process_timeout_reaps_descendant():
+    """硬超时应回收工具启动的子进程，避免孤儿进程。"""
+    import psutil
+    from app.agent.tool_process import run_tool_in_subprocess
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        pid_path = Path(tmpdir) / "descendant.pid"
+        outcome = run_tool_in_subprocess(
+            _spawn_descendant_and_wait,
+            {"pid_path": str(pid_path), "delay": 5.0},
+            timeout_seconds=1.0,
+        )
+        _assert(outcome.timed_out, "execution should time out")
+        _assert(outcome.tree_terminated, "worker process tree should be terminated")
+        _assert(pid_path.exists(), "descendant should start before timeout")
+        descendant_pid = int(pid_path.read_text(encoding="utf-8"))
+        time.sleep(0.2)
+        _assert(not psutil.pid_exists(descendant_pid), "descendant process is still alive")
+
+    print("[PASS] test_process_timeout_reaps_descendant")
+
+
+def test_unserializable_process_result_becomes_error():
+    """无法跨进程传输的返回值应变成明确错误，而不是挂死。"""
+    from app.agent.tool_process import run_tool_in_subprocess
+
+    outcome = run_tool_in_subprocess(
+        _return_unserializable_result,
+        {},
+        timeout_seconds=2.0,
+    )
+    _assert(not outcome.timed_out)
+    _assert("cannot serialize result" in outcome.error)
+
+    print("[PASS] test_unserializable_process_result_becomes_error")
+
+
+def test_abnormal_process_exit_becomes_error_immediately():
+    """工具进程崩溃应立即报错，不能一直等到超时。"""
+    from app.agent.tool_process import run_tool_in_subprocess
+
+    started = time.monotonic()
+    outcome = run_tool_in_subprocess(
+        _exit_without_result,
+        {},
+        timeout_seconds=5.0,
+    )
+    elapsed = time.monotonic() - started
+    _assert(not outcome.timed_out)
+    _assert("exit_code=7" in outcome.error)
+    _assert(elapsed < 2.0, f"abnormal exit detection was too slow: {elapsed:.3f}s")
+
+    print("[PASS] test_abnormal_process_exit_becomes_error_immediately")
 
 
 # ============================================================
@@ -376,6 +475,10 @@ if __name__ == "__main__":
         ("test_run_tool_with_lifecycle_injects_session_id", test_run_tool_with_lifecycle_injects_session_id),
         ("test_run_tool_with_lifecycle_error", test_run_tool_with_lifecycle_error),
         ("test_run_tool_with_lifecycle_error_dict", test_run_tool_with_lifecycle_error_dict),
+        ("test_process_timeout_stops_late_side_effect", test_process_timeout_stops_late_side_effect),
+        ("test_process_timeout_reaps_descendant", test_process_timeout_reaps_descendant),
+        ("test_unserializable_process_result_becomes_error", test_unserializable_process_result_becomes_error),
+        ("test_abnormal_process_exit_becomes_error_immediately", test_abnormal_process_exit_becomes_error_immediately),
         ("test_collect_generated_files", test_collect_generated_files),
         ("test_collect_generated_files_empty", test_collect_generated_files_empty),
         ("test_collect_generated_files_nonexistent", test_collect_generated_files_nonexistent),

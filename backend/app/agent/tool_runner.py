@@ -12,10 +12,9 @@
 8. (Feature 2) 审计日志：非阻塞持久化执行记录
 """
 
-import time
 import inspect
 import threading
-import concurrent.futures
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
@@ -30,6 +29,7 @@ from app.agent.tool_result import (
     _coerce_output_file,
 )
 from app.agent.tool_registry import get_tool_meta
+from app.agent.tool_process import run_tool_in_subprocess
 from app.agent.agent_constants import (
     FEATURE_FLAGS,
     DEFAULT_TOOL_TIMEOUT_SECONDS,
@@ -97,7 +97,7 @@ class ResourceMonitor:
             return
         self._started = True
 
-        if _PSUTIL_AVAILABLE:
+        if _PSUTIL_AVAILABLE and psutil is not None:
             try:
                 proc = psutil.Process()
                 self._start_memory = proc.memory_info().rss / (1024 * 1024)
@@ -116,7 +116,7 @@ class ResourceMonitor:
             max_memory_mb=self.max_memory_mb,
         )
 
-        if _PSUTIL_AVAILABLE:
+        if _PSUTIL_AVAILABLE and psutil is not None:
             try:
                 proc = psutil.Process()
                 end_mem = proc.memory_info().rss / (1024 * 1024)
@@ -309,8 +309,9 @@ def run_tool_with_lifecycle(
     tool_name: str,
     func: Callable,
     function_args: Dict[str, Any],
-    session_id: str = None,
-    timeout_override: int = None,  # Feature 1: caller-forced timeout
+    session_id: Optional[str] = None,
+    timeout_override: Optional[int] = None,  # Feature 1: caller-forced timeout
+    cancellation_event: Optional[threading.Event] = None,
 ) -> ToolResult:
     """
     工具执行统一生命周期包装器。
@@ -319,7 +320,7 @@ def run_tool_with_lifecycle(
     1. 创建 ToolExecutionContext（自动 job_id / job_dir）
     2. 注入 runtime 参数（session_id, job_dir, context）
     3. 【Feature 1】解析资源限制，启动 ResourceMonitor
-    4. 执行工具函数（ThreadPoolExecutor + timeout）
+    4. 在可终止的独立进程中执行工具函数
     5. 捕获异常，构造 error ToolResult
     6. 归一化为 ToolResult
     7. 自动扫描 job_dir 中生成的文件
@@ -334,6 +335,7 @@ def run_tool_with_lifecycle(
         function_args: 传递给工具函数的参数
         session_id: 会话 ID
         timeout_override: 强制超时（秒），为 None 时使用工具注册值或默认值
+        cancellation_event: 可选的合作式取消信号；触发后会终止工具进程树
 
     Returns:
         标准 ToolResult
@@ -386,42 +388,47 @@ def run_tool_with_lifecycle(
         except Exception:
             pass
 
-    # 3-4. 执行工具（ThreadPoolExecutor + timeout）
-    raw_result = None
-    exception_occurred = False
-
-    executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-    future = executor.submit(func, **function_args)
-    timed_out = False
-    try:
-        raw_result = future.result(timeout=effective_timeout)
-    except concurrent.futures.TimeoutError:
-        timed_out = True
-        future.cancel()
-        exception_occurred = True
+    # 3-4. 独立进程提供硬超时边界，超时或取消时终止整个进程树。
+    process_outcome = run_tool_in_subprocess(
+        func=func,
+        function_args=function_args,
+        timeout_seconds=effective_timeout,
+        cancellation_event=cancellation_event,
+    )
+    exception_occurred = bool(
+        process_outcome.error
+        or process_outcome.timed_out
+        or process_outcome.cancelled
+    )
+    if process_outcome.timed_out:
+        termination = "已终止进程树" if process_outcome.tree_terminated else "进程树终止状态未知"
         raw_result = {
             "status": "error",
-            "message": f"工具执行超时（>{effective_timeout} 秒），已中断",
+            "message": f"工具执行超时（>{effective_timeout} 秒），{termination}",
             "tool": tool_name,
         }
-    except Exception as e:
-        exception_occurred = True
+    elif process_outcome.cancelled:
+        termination = "已终止进程树" if process_outcome.tree_terminated else "进程树终止状态未知"
         raw_result = {
             "status": "error",
-            "message": f"工具执行异常: {str(e)}",
+            "message": f"工具执行已取消，{termination}",
             "tool": tool_name,
         }
-    finally:
-        # Python 线程无法强制终止；超时时立即返回，未启动任务会被取消，
-        # 已运行任务由工具自身的进程级超时负责收敛。
-        executor.shutdown(wait=not timed_out, cancel_futures=timed_out)
+    elif process_outcome.error:
+        raw_result = {
+            "status": "error",
+            "message": f"工具执行异常: {process_outcome.error}",
+            "tool": tool_name,
+        }
+    else:
+        raw_result = process_outcome.result
 
     t_end = time.time()
     finished_at = time.strftime("%Y-%m-%dT%H:%M:%S")
     runtime_seconds = round(t_end - t_start, 3)
 
     # ---- Feature 1: 收集资源使用 ----
-    if exception_occurred and isinstance(raw_result, dict) and "超时" in str(raw_result.get("message", "")):
+    if process_outcome.timed_out:
         resource_usage = monitor.mark_timeout()
     else:
         resource_usage = monitor.stop()

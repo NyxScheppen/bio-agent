@@ -28,7 +28,9 @@ def allowed_tool_names_for_skill(
         }
         return (candidates & file_tools) - banned
 
-    return candidates - banned
+    # Implemented and partial skills must declare their capability boundary.
+    # An empty allowlist is a configuration error and must not expose everything.
+    return set()
 
 
 def filter_tool_schema_for_skill(tools_schema: list, skill: Any) -> list:

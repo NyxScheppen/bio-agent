@@ -1,5 +1,6 @@
 import asyncio
 import json
+import re
 from typing import Any, Dict, List, Optional
 
 from app.core.config import MODEL_NAME
@@ -90,6 +91,29 @@ def _normalize_execution_mode(value: Any) -> str:
     if mode in {"answer_only", "tool_execution", "ask_user"}:
         return mode
     return "tool_execution"
+
+
+def _available_files_from_context(context_pack: Dict[str, Any]) -> List[str]:
+    """Extract uploaded or explicitly mentioned file names from the context pack."""
+    texts = [
+        str(context_pack.get("summary", "")),
+        str(context_pack.get("latest_user_message", "")),
+    ]
+    texts.extend(
+        str(message.get("content", ""))
+        for message in context_pack.get("recent_messages", [])
+        if isinstance(message, dict)
+    )
+    patterns = (
+        r"文件名\s*:\s*([^|\r\n]+)",
+        r"\b[^\s|<>:\"']+\.(?:csv|tsv|txt|xlsx|xls|gz|zip|rds|h5ad|mtx)\b",
+    )
+    found: List[str] = []
+    for text in texts:
+        for pattern in patterns:
+            found.extend(match.strip() for match in re.findall(pattern, text, flags=re.I))
+    normalized = [name.replace("\\", "/").rsplit("/", 1)[-1] for name in found if name]
+    return list(dict.fromkeys(normalized))
 
 
 def _run_delegated_tasks(
@@ -201,6 +225,7 @@ def _run_bio_agent_sync(
     selected_skill: Optional[SkillSpec] = select_skill(
         latest_user_message=context_pack.get("latest_user_message", ""),
         router_result=router_result,
+        available_files=_available_files_from_context(context_pack),
     )
     if selected_skill:
         print(f"\n🎯 [Skill] {selected_skill.skill_id} — {selected_skill.name}")
@@ -261,7 +286,7 @@ def _run_bio_agent_sync(
             planner_result=planner_result
         )
 
-        domain_prompt = build_domain_prompt(categories)
+        domain_prompt = build_domain_prompt(categories, agent_role="reporter")
 
         payload = {
             "context_summary": context_pack.get("summary", ""),

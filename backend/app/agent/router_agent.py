@@ -41,7 +41,7 @@ def run_router_agent(context_pack: Dict[str, Any]) -> Dict[str, Any]:
 
     result = call_json_agent(ROUTER_PROMPT, payload)
 
-    if not result or result.get("error"):
+    if not _is_valid_router_result(result) or result.get("error"):
         result = {
             "task_type": "unclear",
             "subtask_type": "unknown",
@@ -54,6 +54,23 @@ def run_router_agent(context_pack: Dict[str, Any]) -> Dict[str, Any]:
         }
 
     return result
+
+
+def _is_valid_router_result(result: Any) -> bool:
+    if not isinstance(result, dict):
+        return False
+    if result.get("error"):
+        return True
+    if not result or "task_type" not in result or "subtask_type" not in result:
+        return False
+    string_fields = ("task_type", "subtask_type", "complexity")
+    if any(not isinstance(result.get(field, ""), str) for field in string_fields):
+        return False
+    if "need_clarification" in result and not isinstance(result["need_clarification"], bool):
+        return False
+    if "tool_categories" in result and not isinstance(result["tool_categories"], list):
+        return False
+    return True
 
 
 def _try_resolve_command(latest_user_message: str) -> Dict[str, Any] | None:

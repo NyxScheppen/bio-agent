@@ -50,7 +50,7 @@ DELEGATOR_PROMPT = """
 2. 不要编造不存在的工具名
 3. 参数优先复制 Planner 的 parameters；缺失时再根据 parameter_strategy 补全
 4. 如果不确定是否可并行，should_delegate=false
-5. args 中引用前置子任务时使用精确值 "$step_N"，N 必须对应 task_id
+5. args 中引用前置子任务时使用精确值 "$step_N"，N 是从 0 开始的 sub_tasks 列表索引
 """
 
 
@@ -70,6 +70,8 @@ def run_delegator_agent(
         {"should_delegate": bool, "reason": str, "sub_tasks": [...]}
     """
     steps = planner_result.get("steps", [])
+    if not isinstance(steps, list) or any(not isinstance(step, dict) for step in steps):
+        return {"should_delegate": False, "reason": "Planner steps 格式无效", "sub_tasks": []}
     if len(steps) < 3:
         return {"should_delegate": False, "reason": "步骤数不足3，无并行收益", "sub_tasks": []}
 
@@ -125,6 +127,17 @@ def run_delegator_agent(
                 "reason": "Delegator 无法解析",
                 "sub_tasks": [],
             }
+
+    if (
+        not isinstance(result, dict)
+        or not isinstance(result.get("should_delegate"), bool)
+        or not isinstance(result.get("sub_tasks", []), list)
+    ):
+        return {
+            "should_delegate": False,
+            "reason": "Delegator 输出格式无效",
+            "sub_tasks": [],
+        }
 
     # 验证子任务结构、工具名和依赖索引，避免把坏计划送进调度器。
     if result.get("should_delegate") and result.get("sub_tasks"):
@@ -257,7 +270,7 @@ def _remap_step_references(value: Any, id_to_index: Dict[int, int]) -> Any:
     try:
         step_id = int(value[len("$step_"):])
     except ValueError:
-        return value
+        raise ValueError(f"无效步骤引用: {value}")
     if step_id not in id_to_index:
-        return value
+        raise ValueError(f"引用未知步骤: {value}")
     return f"$step_{id_to_index[step_id]}"

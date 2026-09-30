@@ -30,7 +30,7 @@ def run_reporter_agent(
         planner_result=planner_result
     )
 
-    domain_prompt = build_domain_prompt(categories)
+    domain_prompt = build_domain_prompt(categories, agent_role="reporter")
 
     payload = {
         "context_summary": context_pack.get("summary", ""),
@@ -44,7 +44,11 @@ def run_reporter_agent(
     }
 
     # --- Skill 报告模板注入 ---
-    if selected_skill and selected_skill.report_sections:
+    if selected_skill and (
+        selected_skill.report_sections
+        or selected_skill.safety_rules
+        or selected_skill.output_expectations
+    ):
         payload["report_template"] = _build_report_template(selected_skill)
 
     messages = [
@@ -89,6 +93,16 @@ def _build_report_template(skill: SkillSpec) -> str:
     for sec in sections:
         lines.append(f"## {sec.title}")
         lines.append(f"  (内容提示: {sec.content_hint})")
+        lines.append("")
+
+    if skill.safety_rules:
+        lines.append("必须遵守以下 Skill 安全声明：")
+        lines.extend(f"- {rule}" for rule in skill.safety_rules)
+        lines.append("")
+
+    if skill.output_expectations:
+        lines.append("预期产物（仅报告工具实际生成的项目）：")
+        lines.extend(f"- {item}" for item in skill.output_expectations)
         lines.append("")
 
     lines.append("请确保每个章节都有实际内容，不编造不存在的图表或结果。")

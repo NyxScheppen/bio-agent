@@ -7,9 +7,9 @@ skills:
     subtask_types: [ml_classification]
     trigger_keywords: [classification, random forest, SVM, xgboost, machine learning]
     trigger_keywords_cn: [机器学习, 分类, 随机森林, SVM, 预测模型, 二分类]
-    required_inputs: [feature_file]
+    required_inputs: [feature_file, label_col]
     default_workflow_id: ml_classification_standard
-    allowed_tools: [preview_table_file, run_ml_classification, run_lasso_feature_selection, run_multi_model_comparison]
+    allowed_tools: [preview_table_file, run_ml_classification_model, run_ml_feature_selection_lasso, run_multi_model_comparison]
     tool_categories: [ml, file_io]
     max_tool_rounds: 12
     parameter_rules:
@@ -35,7 +35,7 @@ skills:
         title: "特征重要性"
         content_hint: "top 特征排名"
         order: 3
-    output_expectations: [model_metrics.csv, roc_curve.png, confusion_matrix.png, feature_importance.csv]
+    output_expectations: [ml_metrics.csv, ml_roc_curve.png, ml_confusion_matrix.txt, ml_predictions.csv, ml_feature_importance.csv]
     implementation_status: implemented
     priority: high
     version: "1.0"
@@ -43,15 +43,17 @@ skills:
   - skill_id: multi_model_comparison
     name: "多模型比较"
     category: ml
-    description: "同时训练和比较多种分类模型（LR/RF/SVM/XGBoost/ElasticNet）"
+    description: "同时训练和比较多种分类模型（Logistic/RF/SVM）"
     task_types: [bioinformatics]
-    subtask_types: [ml_classification]
-    trigger_keywords_cn: [多模型比较, 模型对比, 集成学习]
-    required_inputs: [feature_file]
+    subtask_types: [ml_classification, model_comparison]
+    trigger_keywords: [compare, multiple model, benchmark]
+    trigger_keywords_cn: [多模型比较, 模型对比, 哪个模型好, RF vs SVM]
+    required_inputs: [feature_file, label_col]
     allowed_tools: [run_multi_model_comparison, preview_table_file]
     tool_categories: [ml, file_io]
     max_tool_rounds: 14
     safety_rules: ["多模型比较不等于最佳模型"]
+    output_expectations: [multi_model_comparison.csv]
     implementation_status: implemented
     priority: medium
     version: "1.0"
@@ -61,13 +63,14 @@ skills:
     category: ml
     description: "使用 LASSO 回归进行特征选择"
     task_types: [bioinformatics]
-    subtask_types: [ml_feature_selection]
+    subtask_types: [ml_feature_selection, feature_selection]
     trigger_keywords: [lasso, feature selection, elastic net]
     trigger_keywords_cn: [LASSO, 特征选择, 变量筛选]
-    required_inputs: [feature_file]
-    allowed_tools: [run_lasso_feature_selection, preview_table_file]
+    required_inputs: [feature_file, label_col]
+    allowed_tools: [run_ml_feature_selection_lasso, preview_table_file]
     tool_categories: [ml, file_io]
     max_tool_rounds: 8
+    output_expectations: [lasso_feature_selection.csv, lasso_feature_cv_curve.png, lasso_feature_coef_path.png]
     implementation_status: implemented
     priority: high
     version: "1.0"

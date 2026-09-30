@@ -10,7 +10,7 @@ skills:
     required_inputs: [expression_file, group_file]
     optional_inputs: [batch_file]
     default_workflow_id: bulk_deg_standard
-    allowed_tools: [preview_table_file, probe_unknown_file, run_bulk_rnaseq_deg_analysis, run_deseq2_count_deg_analysis, run_bulk_pca_analysis]
+    allowed_tools: [preview_table_file, run_bulk_rnaseq_deg_analysis, run_deseq2_count_deg_analysis, run_bulk_pca_analysis]
     tool_categories: [transcriptome, file_io]
     max_tool_rounds: 14
     parameter_rules:
@@ -46,42 +46,6 @@ skills:
     examples:
       - user_input: "对表达矩阵做差异分析"
         expected_skill_id: bulk_rnaseq_deg
-    version: "1.0"
-
-  - skill_id: deseq2_count_deg
-    name: "DESeq2 Count 差异分析"
-    category: transcriptome
-    description: "使用 DESeq2 对原始 count 矩阵进行差异表达分析"
-    task_types: [bioinformatics]
-    subtask_types: [deseq2, deg_analysis]
-    trigger_keywords: [deseq2, count, raw count]
-    trigger_keywords_cn: [count矩阵, 原始count, DESeq2, read count]
-    required_inputs: [count_file, group_file]
-    default_workflow_id: deseq2_standard
-    allowed_tools: [run_deseq2_count_deg_analysis, preview_table_file]
-    tool_categories: [transcriptome, file_io]
-    max_tool_rounds: 12
-    safety_rules: ["必须是原始 count，不是 TPM/FPKM"]
-    output_expectations: [deseq2_results.csv, volcano.png, ma_plot.png, normalized_counts.csv]
-    implementation_status: implemented
-    priority: high
-    version: "1.0"
-
-  - skill_id: bulk_pca_analysis
-    name: "Bulk RNA-seq PCA 分析"
-    category: transcriptome
-    description: "对 bulk RNA-seq 表达矩阵进行主成分分析"
-    task_types: [bioinformatics]
-    subtask_types: [bulk_pca]
-    trigger_keywords: [pca, principal component]
-    trigger_keywords_cn: [PCA, 主成分, 降维, 样本聚类]
-    required_inputs: [expression_file]
-    optional_inputs: [group_file]
-    allowed_tools: [run_bulk_pca_analysis, preview_table_file]
-    tool_categories: [transcriptome, file_io]
-    max_tool_rounds: 6
-    implementation_status: implemented
-    priority: medium
     version: "1.0"
 
   - skill_id: batch_correction

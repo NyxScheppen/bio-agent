@@ -8,7 +8,7 @@
     from app.agent.orchestrator import Orchestrator
     orch = Orchestrator()
     orch.add_task("deg_analysis", {"tool": "run_bulk_rnaseq_deg_analysis", ...})
-    orch.add_task("enrichment", {"tool": "run_enrichment_analysis", ...}, depends_on=["deg_analysis"])
+    orch.add_task("enrichment", {"tool": "run_go_kegg_enrichment", ...}, depends_on=["deg_analysis"])
     results = orch.run_all(session_id="abc123")
 """
 

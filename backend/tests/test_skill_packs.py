@@ -160,7 +160,7 @@ def test_planned_skill_does_not_call_missing_tools():
 
     mock_schema = [
         {"function": {"name": "preview_table_file"}},
-        {"function": {"name": "probe_unknown_file"}},
+        {"function": {"name": "read_csv_data"}},
         {"function": {"name": "some_fake_modeling_tool"}},
         {"function": {"name": "run_survival_analysis"}},
     ]

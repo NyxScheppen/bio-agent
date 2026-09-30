@@ -17,6 +17,10 @@ from app.agent.skills.skill_models import SkillSpec
 SKILL_REGISTRY: Dict[str, SkillSpec] = {}
 
 
+class DuplicateSkillError(ValueError):
+    """Raised when two skill definitions use the same stable ID."""
+
+
 def register_skill(spec: SkillSpec) -> SkillSpec:
     """
     注册一个 Skill。
@@ -34,8 +38,7 @@ def register_skill(spec: SkillSpec) -> SkillSpec:
         raise ValueError("SkillSpec.skill_id is required")
 
     if spec.skill_id in SKILL_REGISTRY:
-        # 允许覆盖但打印警告
-        print(f"[skill_registry] Overwriting existing skill: {spec.skill_id}")
+        raise DuplicateSkillError(f"Duplicate skill_id: {spec.skill_id}")
 
     SKILL_REGISTRY[spec.skill_id] = spec
     return spec

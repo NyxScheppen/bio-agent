@@ -9,7 +9,7 @@ skills:
     trigger_keywords_cn: [GO分析, GO富集, 基因本体, 生物学过程, 细胞组分, 分子功能]
     required_inputs: [gene_list_file]
     default_workflow_id: enrichment_standard
-    allowed_tools: [preview_table_file, run_enrichment_analysis]
+    allowed_tools: [preview_table_file, run_go_kegg_enrichment]
     tool_categories: [enrichment, file_io]
     max_tool_rounds: 8
     safety_rules: ["不要编造通路", "富集结果不代表因果关系"]
@@ -40,7 +40,7 @@ skills:
     trigger_keywords: [KEGG, pathway]
     trigger_keywords_cn: [KEGG, 通路, 代谢通路, 信号通路]
     required_inputs: [gene_list_file]
-    allowed_tools: [preview_table_file, run_enrichment_analysis]
+    allowed_tools: [preview_table_file, run_go_kegg_enrichment]
     tool_categories: [enrichment, file_io]
     max_tool_rounds: 6
     implementation_status: implemented
@@ -90,7 +90,7 @@ skills:
     subtask_types: [enrichment]
     trigger_keywords_cn: [综合富集, 多数据库, 功能注释]
     required_inputs: [gene_list_file]
-    allowed_tools: [run_enrichment_analysis]
+    allowed_tools: [run_go_kegg_enrichment]
     tool_categories: [enrichment]
     max_tool_rounds: 10
     implementation_status: planned

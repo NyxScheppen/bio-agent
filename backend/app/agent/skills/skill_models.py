@@ -100,7 +100,7 @@ class SkillSpec(BaseModel):
     allowed_tools: List[str] = Field(default_factory=list)
     banned_tools: List[str] = Field(default_factory=list)
     tool_categories: List[str] = Field(default_factory=list)  # 技能涉及的工具类别
-    max_tool_rounds: int = 8
+    max_tool_rounds: int = Field(default=8, ge=1, le=20)
 
     # --- 规则 ---
     parameter_rules: List[SkillParameterRule] = Field(default_factory=list)

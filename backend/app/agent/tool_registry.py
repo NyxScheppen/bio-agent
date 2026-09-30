@@ -11,6 +11,10 @@ TOOL_META: Dict[str, dict] = {}
 # 记录已加载的模块，用于 auto_discover 避免重复
 _LOADED_TOOL_MODULES: set = set()
 
+
+class DuplicateToolError(ValueError):
+    """Raised when two callables claim the same public tool name."""
+
 VALID_TOOL_CATEGORIES = {
     "file_io",
     "basic",
@@ -200,6 +204,11 @@ def register_tool(
 
     def decorator(func):
         nonlocal parameters
+
+        if not name or not str(name).strip():
+            raise ValueError("Tool name is required")
+        if name in TOOL_REGISTRY:
+            raise DuplicateToolError(f"Duplicate tool name: {name}")
 
         final_category = normalize_tool_category(
             category or infer_tool_category(name, description)

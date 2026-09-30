@@ -47,8 +47,15 @@ def ensure_skills_loaded(pack_dir: str = None) -> list:
         # 已加载，返回现有
         return sorted(SKILL_REGISTRY.keys())
 
-    # 从 YAML packs 加载
-    from app.agent.skills.skill_loader import load_all_skill_packs
-    load_all_skill_packs(pack_dir)
+    # 从 YAML packs 加载并校验工具引用
+    from app import tools as _tools  # noqa: F401
+    from app.agent.skills.skill_loader import (
+        load_all_skill_packs,
+        validate_skill_tool_references,
+    )
+    from app.agent.tool_registry import TOOL_REGISTRY
+
+    loaded = load_all_skill_packs(pack_dir)
+    validate_skill_tool_references(loaded, TOOL_REGISTRY)
 
     return sorted(SKILL_REGISTRY.keys())

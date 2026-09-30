@@ -80,12 +80,14 @@ def run_planner_agent(
                 for r in selected_skill.clarification_rules
             ],
             "max_tool_rounds": selected_skill.max_tool_rounds,
+            "safety_rules": selected_skill.safety_rules,
+            "output_expectations": selected_skill.output_expectations,
         }
         payload["skill_prompt"] = _build_skill_planner_prompt(selected_skill)
 
     result = call_json_agent(PLANNER_PROMPT, payload)
 
-    if not result or result.get("error"):
+    if not _is_valid_planner_result(result) or result.get("error"):
         max_rounds = selected_skill.max_tool_rounds if selected_skill else 8
         router_mode = str(router_result.get("suggested_mode", "")).lower()
         if router_mode == "direct_answer":
@@ -113,13 +115,21 @@ def run_planner_agent(
     if selected_skill:
         if not result.get("workflow_id"):
             result["workflow_id"] = selected_skill.default_workflow_id
-        # skill 的 max_tool_rounds 作为上限
-        if not result.get("max_tool_rounds") or result.get("max_tool_rounds", 0) <= 0:
-            result["max_tool_rounds"] = selected_skill.max_tool_rounds
+        try:
+            requested_rounds = int(result.get("max_tool_rounds", selected_skill.max_tool_rounds))
+        except (TypeError, ValueError):
+            requested_rounds = selected_skill.max_tool_rounds
+        result["max_tool_rounds"] = min(
+            max(1, requested_rounds),
+            selected_skill.max_tool_rounds,
+        )
+        result["skill_max_tool_rounds"] = selected_skill.max_tool_rounds
         # 注入 skill 参数规则
         result["skill_id"] = selected_skill.skill_id
         result["skill_parameter_rules"] = payload.get("selected_skill", {}).get("parameter_rules", [])
         result["skill_clarification_rules"] = payload.get("selected_skill", {}).get("clarification_rules", [])
+        result["skill_safety_rules"] = list(selected_skill.safety_rules)
+        result["skill_output_expectations"] = list(selected_skill.output_expectations)
 
     if router_result.get("need_clarification"):
         result["execution_mode"] = "ask_user"
@@ -129,7 +139,86 @@ def run_planner_agent(
     if not result.get("tool_categories"):
         result["tool_categories"] = router_categories or ["general"]
 
+    result["available_tools"] = available_tools
+
     return result
+
+
+def _is_valid_planner_result(result: Any) -> bool:
+    """Validate the structural contract before downstream agents consume it."""
+    if not isinstance(result, dict):
+        return False
+    if result.get("error"):
+        return True
+
+    if not result or "steps" not in result or "execution_mode" not in result:
+        return False
+    if result["execution_mode"] not in {"answer_only", "tool_execution", "ask_user"}:
+        return False
+    if "tool_categories" in result and not isinstance(result["tool_categories"], list):
+        return False
+    if "user_question_if_any" in result and not isinstance(result["user_question_if_any"], str):
+        return False
+
+    steps = result.get("steps", [])
+    dependencies = result.get("step_dependencies", {})
+    parallel_groups = result.get("parallel_groups", [])
+    if not isinstance(steps, list):
+        return False
+    if not isinstance(dependencies, dict) or not isinstance(parallel_groups, list):
+        return False
+
+    seen_step_ids = set()
+    for step in steps:
+        if not isinstance(step, dict):
+            return False
+        preferred_tools = step.get("preferred_tools", [])
+        if not isinstance(preferred_tools, list) or any(
+            not isinstance(tool, str) for tool in preferred_tools
+        ):
+            return False
+        if not isinstance(step.get("parameters", {}), dict):
+            return False
+        step_id = step.get("step_id")
+        if step_id is None:
+            return False
+        try:
+            normalized_id = int(step_id)
+        except (TypeError, ValueError):
+            return False
+        if normalized_id in seen_step_ids:
+            return False
+        seen_step_ids.add(normalized_id)
+
+    if not all(isinstance(group, list) for group in parallel_groups):
+        return False
+    try:
+        normalized_dependencies = {
+            int(step_id): [int(dependency) for dependency in items]
+            for step_id, items in dependencies.items()
+            if isinstance(items, list)
+        }
+        normalized_groups = [
+            [int(step_id) for step_id in group]
+            for group in parallel_groups
+        ]
+    except (TypeError, ValueError):
+        return False
+    if len(normalized_dependencies) != len(dependencies):
+        return False
+    for step_id, dependency_ids in normalized_dependencies.items():
+        if step_id not in seen_step_ids:
+            return False
+        if any(
+            dependency_id not in seen_step_ids or dependency_id == step_id
+            for dependency_id in dependency_ids
+        ):
+            return False
+    return all(
+        step_id in seen_step_ids
+        for group in normalized_groups
+        for step_id in group
+    )
 
 
 def _build_skill_tool_brief(skill: SkillSpec) -> list:
@@ -173,6 +262,14 @@ def _build_skill_planner_prompt(skill: SkillSpec) -> str:
 
     if skill.qc_rules:
         lines.append(f"QC 步骤: {', '.join(skill.qc_rules)}")
+
+    if skill.safety_rules:
+        lines.append("安全规则：")
+        lines.extend(f"  - {rule}" for rule in skill.safety_rules)
+
+    if skill.output_expectations:
+        lines.append("预期产物（不得据此编造未生成文件）：")
+        lines.extend(f"  - {item}" for item in skill.output_expectations)
 
     lines.append(f"最大工具轮次: {skill.max_tool_rounds}")
     lines.append("请严格遵守上述 Skill 定义规划步骤。")

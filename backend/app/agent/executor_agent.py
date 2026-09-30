@@ -89,7 +89,8 @@ def _apply_skill_tool_filter(
 def build_executor_messages(
     context_pack: Dict[str, Any],
     router_result: Dict[str, Any],
-    planner_result: Dict[str, Any]
+    planner_result: Dict[str, Any],
+    selected_skill: Opt[SkillSpec] = None,
 ) -> list:
     categories = resolve_tool_categories(
         context_pack=context_pack,
@@ -115,6 +116,16 @@ def build_executor_messages(
             )
         }
     ]
+
+    if selected_skill and (selected_skill.safety_rules or selected_skill.output_expectations):
+        skill_lines = [f"【Skill 运行约束: {selected_skill.skill_id}】"]
+        skill_lines.extend(f"- 安全规则: {rule}" for rule in selected_skill.safety_rules)
+        if selected_skill.output_expectations:
+            skill_lines.append("- 预期产物仅是执行目标；只有工具实际返回的文件才算生成成功。")
+            skill_lines.extend(
+                f"  - {item}" for item in selected_skill.output_expectations
+            )
+        messages.append({"role": "system", "content": "\n".join(skill_lines)})
 
     if context_pack.get("summary"):
         messages.append({
@@ -269,6 +280,12 @@ def get_effective_max_tool_rounds(
         rounds = max(rounds, BIOINFO_COMPLEX_MIN_TOOL_ROUNDS)
 
     rounds = max(1, min(rounds, HARD_MAX_TOOL_ROUNDS))
+    try:
+        skill_cap = int(planner_result.get("skill_max_tool_rounds", 0))
+    except (TypeError, ValueError):
+        skill_cap = 0
+    if skill_cap > 0:
+        rounds = min(rounds, skill_cap)
     return rounds
 
 
@@ -341,7 +358,12 @@ def run_executor_agent(
     selected_skill: Opt[SkillSpec] = None,
 ) -> Dict[str, Any]:
     session_id = session_id or ""
-    messages = build_executor_messages(context_pack, router_result, planner_result)
+    messages = build_executor_messages(
+        context_pack,
+        router_result,
+        planner_result,
+        selected_skill=selected_skill,
+    )
 
     executor_tools_schema = filter_tools_schema_by_plan(
         router_result=router_result,

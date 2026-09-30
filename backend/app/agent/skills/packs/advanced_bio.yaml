@@ -9,7 +9,7 @@ skills:
     trigger_keywords_cn: [GEO, 下载, 公共数据, GSE, 表达谱]
     required_inputs: [geo_accession]
     optional_inputs: [platform_id]
-    allowed_tools: [preview_table_file, load_large_bio_data, probe_unknown_file]
+    allowed_tools: [preview_table_file, load_large_bio_data]
     tool_categories: [file_io, transcriptome]
     max_tool_rounds: 6
     parameter_rules:
@@ -23,6 +23,10 @@ skills:
       - condition: missing_accession
         question_template: "请提供 GEO accession ID（如 GSE84402）"
         priority: required
+      - condition: source_file_not_uploaded
+        question_template: "当前环境不能按 accession 联网下载 GEO 数据；请上传已下载的 series_matrix 或表达矩阵文件"
+        priority: required
+    safety_rules: ["当前工具仅支持读取和预览已下载的 GEO 文件，不支持按 accession 联网下载"]
     report_sections:
       - section_id: overview
         title: "数据概览"
@@ -33,7 +37,7 @@ skills:
         content_hint: "缺失值、表达分布、样本聚类"
         order: 2
     output_expectations: [expression_matrix.csv, clinical_data.csv, qc_report.txt]
-    implementation_status: implemented
+    implementation_status: partial
     priority: high
     examples:
       - user_input: "下载 GSE84402 的表达数据"
@@ -127,7 +131,7 @@ skills:
     trigger_keywords: [cibersort, immune, estimate, timer]
     trigger_keywords_cn: [免疫浸润, 免疫细胞, CIBERSORT, 肿瘤微环境, ESTIMATE]
     required_inputs: [expression_file]
-    allowed_tools: [preview_table_file, run_enrichment_analysis]
+    allowed_tools: [preview_table_file, run_go_kegg_enrichment]
     tool_categories: [transcriptome, enrichment, file_io]
     max_tool_rounds: 12
     implementation_status: planned

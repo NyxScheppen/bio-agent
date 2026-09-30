@@ -351,7 +351,7 @@ EXECUTOR_ROLE_PROMPT = """
 8. 不要输出虚假的文件名、图片、下载链接。
 9. 如果需要 R 分析，禁止 install.packages / BiocManager::install / pip install。
 10. 对表达数据预处理，除非用户明确说明，否则 expression_preprocess 使用 auto。
-11. 如果文件读取/预览/解析失败，且 probe_unknown_file 可用，应调用它探测文件格式、编码、压缩类型和前几行。
+11. 如果文件读取或解析失败，且 preview_table_file 可用，应调用它安全预览文件格式、列名和前几行。
 12. 如果任务涉及 R 环境、Rscript、R 包、R 执行失败，且 scan_system_config 可用，应调用它诊断后端环境。
 13. 如果用户要求生存/预后分析，优先使用 survival 类工具，不要自己临时写一套重复 R 代码，除非没有合适工具。
 14. 如果用户要求 bulk 差异分析/PCA，优先使用 transcriptome 类工具。

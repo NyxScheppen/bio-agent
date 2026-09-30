@@ -14,7 +14,7 @@
     manager = SubAgentManager()
     tasks = [
         SubAgentTask(goal="DEG分析", tool="run_bulk_rnaseq_deg_analysis", args={...}),
-        SubAgentTask(goal="富集分析", tool="run_enrichment_analysis", args={...}),
+        SubAgentTask(goal="富集分析", tool="run_go_kegg_enrichment", args={...}),
     ]
     results = manager.spawn_and_collect_all(tasks, session_id="abc123")
 """

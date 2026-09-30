@@ -6,7 +6,7 @@
 架构:
     RecoveryStrategy (ABC)
         ├── REnvironmentRecovery   — R 环境错误 → scan_system_config
-        └── FileParseRecovery      — 文件解析错误 → probe_unknown_file
+        └── FileParseRecovery      — 文件解析错误 → preview_table_file
 
 用法:
     # 全局默认（所有工具自动应用）
@@ -143,10 +143,10 @@ class REnvironmentRecovery(RecoveryStrategy):
 
 class FileParseRecovery(RecoveryStrategy):
     """
-    检测到文件读入/解析错误时，自动调用 probe_unknown_file 探测文件格式。
+    检测到文件读入/解析错误时，自动调用 preview_table_file 探测文件格式。
 
     触发条件：结果文本包含 file not found / parse / encoding 等关键词。
-    恢复动作：从原工具有参数中提取文件路径，调用 probe_unknown_file() 探测。
+    恢复动作：从原工具参数中提取文件路径，调用 preview_table_file() 探测。
     """
 
     _ERROR_KEYWORDS = [
@@ -170,8 +170,8 @@ class FileParseRecovery(RecoveryStrategy):
         tool_name: str,
         function_args: Dict[str, Any],
     ) -> bool:
-        # 不要对 probe_unknown_file 自身递归
-        if tool_name == "probe_unknown_file":
+        # 不要对 preview_table_file 自身递归
+        if tool_name == "preview_table_file":
             return False
         text = self._coerce_to_text(tool_result).lower()
         return any(k in text for k in self._ERROR_KEYWORDS)
@@ -183,7 +183,7 @@ class FileParseRecovery(RecoveryStrategy):
         file_path = self._guess_file_arg(function_args)
         if not file_path:
             return (None, None)
-        return ("probe_unknown_file", {"file_path": file_path})
+        return ("preview_table_file", {"file_path": file_path})
 
     @staticmethod
     def _guess_file_arg(function_args: Dict[str, Any]) -> str:
@@ -373,10 +373,10 @@ class DependencyRecovery(RecoveryStrategy):
 
 class EncodingRecovery(RecoveryStrategy):
     """
-    检测到 encoding 错误时，调用 probe_unknown_file 以探测正确编码。
+    检测到 encoding 错误时，调用 preview_table_file 以探测编码和格式。
 
     触发条件：结果文本包含 encoding / UnicodeDecode / 乱码关键词。
-    恢复动作：调用 probe_unknown_file() 探测编码和格式。
+    恢复动作：调用 preview_table_file() 探测编码和格式。
     """
 
     _ERROR_KEYWORDS = [
@@ -398,7 +398,7 @@ class EncodingRecovery(RecoveryStrategy):
         tool_name: str,
         function_args: Dict[str, Any],
     ) -> bool:
-        if tool_name == "probe_unknown_file":
+        if tool_name == "preview_table_file":
             return False
         text = self._coerce_to_text(tool_result).lower()
         # 避免误匹配：只在明确是错误时触发
@@ -416,7 +416,7 @@ class EncodingRecovery(RecoveryStrategy):
         file_path = FileParseRecovery._guess_file_arg(function_args)
         if not file_path:
             return (None, None)
-        return ("probe_unknown_file", {"file_path": file_path})
+        return ("preview_table_file", {"file_path": file_path})
 
     @property
     def max_retries(self) -> int:

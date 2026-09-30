@@ -54,6 +54,14 @@ def select_skill(
     scored: List[Tuple[SkillSpec, float]] = []
 
     for skill in candidates:
+        if not _has_match_evidence(
+            skill=skill,
+            user_message=latest_user_message,
+            task_type=task_type,
+            subtask_type=subtask_type,
+            available_files=available_files,
+        ):
+            continue
         score = _score_skill(
             skill=skill,
             user_message=latest_user_message,
@@ -67,8 +75,14 @@ def select_skill(
     if not scored:
         return None
 
-    # 按分数降序排列
-    scored.sort(key=lambda x: x[1], reverse=True)
+    priority_rank = {"high": 3, "medium": 2, "low": 1}
+    scored.sort(
+        key=lambda x: (
+            -x[1],
+            -priority_rank.get(x[0].priority, 0),
+            x[0].skill_id,
+        )
+    )
 
     best_skill, best_score = scored[0]
 
@@ -85,6 +99,38 @@ def select_skill(
         )
 
     return best_skill
+
+
+def _has_match_evidence(
+    skill: SkillSpec,
+    user_message: str,
+    task_type: str,
+    subtask_type: str,
+    available_files: List[str],
+) -> bool:
+    """Require a real routing signal before status and priority bonuses apply."""
+    normalized_task = task_type.lower().strip()
+    normalized_subtask = subtask_type.lower().strip()
+    generic_task_types = {"general", "bioinformatics", "file_processing", "unclear", "unknown"}
+    if (
+        normalized_task
+        and normalized_task not in generic_task_types
+        and normalized_task in {t.lower() for t in skill.task_types}
+    ):
+        return True
+    if normalized_subtask and normalized_subtask in {t.lower() for t in skill.subtask_types}:
+        return True
+
+    text = (user_message or "").lower()
+    keywords = list(skill.trigger_keywords) + list(skill.trigger_keywords_cn)
+    if text and any(_keyword_matches(text, str(keyword)) for keyword in keywords if keyword):
+        return True
+
+    return bool(
+        skill.required_inputs
+        and normalized_task in {t.lower() for t in skill.task_types}
+        and _score_inputs(skill, available_files) > 0
+    )
 
 
 def _score_skill(
@@ -178,8 +224,7 @@ def _score_keywords(skill: SkillSpec, user_message: str) -> float:
 
     hit_count = 0
     for kw in all_keywords:
-        kw_lower = kw.lower()
-        if kw_lower in text:
+        if _keyword_matches(text, str(kw)):
             hit_count += 1
 
     if hit_count == 0:
@@ -188,6 +233,18 @@ def _score_keywords(skill: SkillSpec, user_message: str) -> float:
     # 命中率 + 覆盖率
     coverage = hit_count / len(all_keywords)
     return min(1.0, coverage * 1.5)
+
+
+def _keyword_matches(text: str, keyword: str) -> bool:
+    normalized = keyword.lower().strip()
+    if not normalized:
+        return False
+    if not normalized.isascii():
+        return normalized in text
+    return re.search(
+        rf"(?<![a-z0-9_]){re.escape(normalized)}(?![a-z0-9_])",
+        text,
+    ) is not None
 
 
 def _score_inputs(skill: SkillSpec, available_files: List[str]) -> float:
@@ -205,9 +262,15 @@ def _score_inputs(skill: SkillSpec, available_files: List[str]) -> float:
     hit = 0
     for req in required:
         req_lower = req.lower()
+        aliases = {req_lower}
+        for suffix in ("_file_path", "_file", "_path"):
+            if req_lower.endswith(suffix):
+                stem = req_lower[:-len(suffix)]
+                if stem not in {"data", "input", "file"}:
+                    aliases.add(stem)
         for f in files_lower:
             # 检查文件名包含或文件类型匹配
-            if req_lower in f or f.endswith(req_lower):
+            if any(alias and alias in f for alias in aliases):
                 hit += 1
                 break
 

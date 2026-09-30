@@ -18,7 +18,11 @@ from app.agent.skills.skill_models import (
     SkillParameterRule,
     SkillReportSection,
 )
-from app.agent.skills.skill_registry import register_skill, SKILL_REGISTRY
+from app.agent.skills.skill_registry import (
+    DuplicateSkillError,
+    register_skill,
+    SKILL_REGISTRY,
+)
 
 
 def _get_packs_dir() -> Path:
@@ -67,6 +71,8 @@ def load_skills_from_yaml(path: str) -> List[SkillSpec]:
             spec = _yaml_dict_to_skillspec(raw)
             register_skill(spec)
             loaded.append(spec)
+        except DuplicateSkillError:
+            raise
         except Exception as e:
             skill_id = raw.get("skill_id", "?")
             print(f"[skill_loader] Failed to parse skill '{skill_id}' in {path}: {e}")
@@ -139,6 +145,38 @@ def load_all_skill_packs(pack_dir: str = None) -> List[SkillSpec]:
     return loaded
 
 
+def validate_skill_tool_references(
+    skills: List[SkillSpec],
+    available_tool_names: Any,
+) -> None:
+    """Fail fast when a Skill allowlist names a tool that is not registered."""
+    available = {str(name) for name in available_tool_names}
+    missing_allowlists = sorted(
+        skill.skill_id
+        for skill in skills
+        if skill.implementation_status in {"implemented", "partial"}
+        and not skill.allowed_tools
+    )
+    if missing_allowlists:
+        raise ValueError(
+            "Implemented/partial Skills require allowed_tools: "
+            + ", ".join(missing_allowlists)
+        )
+    missing = {
+        skill.skill_id: sorted(
+            (set(skill.allowed_tools) | set(skill.banned_tools)) - available
+        )
+        for skill in skills
+        if (set(skill.allowed_tools) | set(skill.banned_tools)) - available
+    }
+    if missing:
+        details = "; ".join(
+            f"{skill_id}: {', '.join(tool_names)}"
+            for skill_id, tool_names in sorted(missing.items())
+        )
+        raise ValueError(f"Skill allowed_tools reference unknown tools: {details}")
+
+
 # ============================================================
 # Phase 2.1: SKILL.md 格式加载
 # ============================================================
@@ -208,6 +246,8 @@ def load_skills_from_markdown(path: str) -> List[SkillSpec]:
             spec = _yaml_dict_to_skillspec(raw)
             register_skill(spec)
             loaded.append(spec)
+        except DuplicateSkillError:
+            raise
         except Exception as e:
             skill_id = raw.get("skill_id", "?")
             print(f"[skill_loader] Failed to parse skill '{skill_id}' in {path}: {e}")

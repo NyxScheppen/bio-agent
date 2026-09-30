@@ -10,7 +10,7 @@ skills:
     required_inputs: [expression_file]
     optional_inputs: [clinical_file, group_file]
     default_workflow_id: single_gene_standard
-    allowed_tools: [preview_table_file, run_single_gene_expression_analysis, run_single_gene_correlation, run_single_gene_roc]
+    allowed_tools: [preview_table_file, run_single_gene_expression_analysis, run_expression_correlation_analysis, run_single_gene_roc_analysis]
     tool_categories: [single_gene, file_io]
     max_tool_rounds: 8
     parameter_rules:
@@ -51,7 +51,7 @@ skills:
     subtask_types: [single_gene_analysis]
     trigger_keywords_cn: [基因集, 相关性, 共表达, 基因网络, 热图]
     required_inputs: [expression_file]
-    allowed_tools: [preview_table_file, run_single_gene_correlation]
+    allowed_tools: [preview_table_file, run_expression_correlation_analysis]
     tool_categories: [single_gene, file_io]
     max_tool_rounds: 8
     implementation_status: implemented

@@ -8,7 +8,7 @@ skills:
     trigger_keywords: [file, preview, read, upload, table, csv, xlsx, tsv]
     trigger_keywords_cn: [文件, 预览, 看看, 读取, 上传, 探测, 数据长什么样, 解包, 格式]
     required_inputs: [file]
-    allowed_tools: [preview_table_file, probe_unknown_file, read_csv_data, load_large_bio_data]
+    allowed_tools: [preview_table_file, read_csv_data, load_large_bio_data]
     tool_categories: [file_io]
     max_tool_rounds: 4
     parameter_rules:
@@ -49,7 +49,7 @@ skills:
     subtask_types: [file_convert]
     trigger_keywords_cn: [转换, 格式, 导出, 保存为]
     required_inputs: [file]
-    allowed_tools: [probe_unknown_file]
+    allowed_tools: [preview_table_file, read_csv_data, load_large_bio_data]
     tool_categories: [file_io]
     max_tool_rounds: 3
     implementation_status: planned
@@ -69,20 +69,4 @@ skills:
     max_tool_rounds: 5
     implementation_status: planned
     priority: low
-    version: "1.0"
-
-  - skill_id: geo_data_download
-    name: "GEO 数据下载与解析"
-    category: file_io
-    description: "从 GEO 数据库下载数据集并解析为可分析格式"
-    task_types: [file_processing]
-    subtask_types: [geo_download]
-    trigger_keywords: [GEO, GSE, series matrix, GEOquery]
-    trigger_keywords_cn: [GEO数据, GSE, 公共数据, 下载数据集]
-    required_inputs: [geo_accession]
-    allowed_tools: [load_large_bio_data, preview_table_file]
-    tool_categories: [file_io]
-    max_tool_rounds: 8
-    implementation_status: partial
-    priority: medium
     version: "1.0"

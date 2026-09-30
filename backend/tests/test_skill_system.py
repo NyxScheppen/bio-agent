@@ -233,7 +233,7 @@ def test_executor_skill_allowed_tools():
     # Mock tool schema
     mock_schema = [
         {"function": {"name": "preview_table_file"}},
-        {"function": {"name": "probe_unknown_file"}},
+        {"function": {"name": "read_csv_data"}},
         {"function": {"name": "run_survival_analysis"}},  # not in file_probe
         {"function": {"name": "run_deg_analysis"}},       # not in file_probe
     ]
@@ -242,7 +242,7 @@ def test_executor_skill_allowed_tools():
     _assert_equal(len(filtered), 2)
     names = {item["function"]["name"] for item in filtered}
     _assert("preview_table_file" in names)
-    _assert("probe_unknown_file" in names)
+    _assert("read_csv_data" in names)
     _assert("run_survival_analysis" not in names)
     _assert("run_deg_analysis" not in names)
 

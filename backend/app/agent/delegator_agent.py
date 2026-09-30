@@ -10,9 +10,11 @@ Delegator Agent (Phase 3.2).
     # result: {"should_delegate": bool, "sub_tasks": [...]}
 """
 
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from app.agent.router_agent import call_json_agent
+from app.agent.skills.skill_models import SkillSpec
+from app.agent.skills.tool_policy import allowed_tool_names_for_skill
 
 DELEGATOR_PROMPT = """
 你是 Delegator Agent，负责判断复杂的生信分析任务是否应该拆分为子任务并行执行。
@@ -55,6 +57,7 @@ DELEGATOR_PROMPT = """
 def run_delegator_agent(
     context_pack: Dict[str, Any],
     planner_result: Dict[str, Any],
+    selected_skill: Optional[SkillSpec] = None,
 ) -> Dict[str, Any]:
     """
     判断是否应拆分子Agent。
@@ -76,6 +79,7 @@ def run_delegator_agent(
             sub_tasks = _steps_to_sub_tasks(
                 steps,
                 planner_result.get("step_dependencies", {}),
+                planner_result.get("parallel_groups", []),
             )
         except (TypeError, ValueError):
             return {
@@ -126,6 +130,7 @@ def run_delegator_agent(
     if result.get("should_delegate") and result.get("sub_tasks"):
         from app.agent.tool_registry import TOOL_REGISTRY
 
+        allowed_tools = allowed_tool_names_for_skill(selected_skill, TOOL_REGISTRY)
         valid_tasks = []
         task_count = len(result["sub_tasks"])
         for index, task in enumerate(result["sub_tasks"]):
@@ -135,21 +140,43 @@ def run_delegator_agent(
             tool_name = t.get("tool", "")
             args = t.get("args", {})
             raw_dependencies = t.get("depends_on", [])
+            raw_schedule_after = t.get("schedule_after", [])
             if tool_name not in TOOL_REGISTRY:
                 print(f"[Delegator] 跳过不存在的工具: {tool_name}")
                 continue
-            if not isinstance(args, dict) or not isinstance(raw_dependencies, list):
+            if tool_name not in allowed_tools:
+                print(f"[Delegator] Skill 工具策略拒绝: {tool_name}")
+                continue
+            if (
+                not isinstance(args, dict)
+                or not isinstance(raw_dependencies, list)
+                or not isinstance(raw_schedule_after, list)
+            ):
                 continue
 
             try:
                 dependencies = list(dict.fromkeys(int(dep) for dep in raw_dependencies))
+                schedule_after = list(
+                    dict.fromkeys(int(dep) for dep in raw_schedule_after)
+                )
             except (TypeError, ValueError):
                 continue
-            if any(dep < 0 or dep >= task_count or dep == index for dep in dependencies):
+            if any(
+                dep < 0 or dep >= task_count or dep == index
+                for dep in dependencies + schedule_after
+            ):
                 continue
 
             t["args"] = args
             t["depends_on"] = dependencies
+            t["schedule_after"] = schedule_after
+            # Delegator 输出来自 LLM。除非未来工具元数据显式声明可安全重试，
+            # 委派任务采用至多一次执行语义。
+            t["max_retries"] = 0
+            try:
+                t["timeout"] = max(10, min(int(t.get("timeout", 600)), 3600))
+            except (TypeError, ValueError):
+                continue
             valid_tasks.append(t)
         result["sub_tasks"] = valid_tasks
         if len(valid_tasks) != task_count:
@@ -159,7 +186,11 @@ def run_delegator_agent(
     return result
 
 
-def _steps_to_sub_tasks(steps: list, dependencies: dict) -> list:
+def _steps_to_sub_tasks(
+    steps: list,
+    dependencies: dict,
+    parallel_groups: Optional[list] = None,
+) -> list:
     """将 Planner 步骤转换为子Agent 任务列表。"""
     tasks = []
     id_to_index: Dict[int, int] = {}
@@ -192,7 +223,23 @@ def _steps_to_sub_tasks(steps: list, dependencies: dict) -> list:
                 id_to_index,
             ),
             "depends_on": normalized_dependencies,
+            "schedule_after": [],
+            "max_retries": 0,
+            "timeout": max(10, min(int(s.get("timeout", 600) or 600), 3600)),
         })
+
+    if parallel_groups:
+        from app.agent.parallel_executor import _build_execution_batches
+
+        batches = _build_execution_batches(steps, dependencies, parallel_groups)
+        previous_batch_indexes: list[int] = []
+        for batch in batches:
+            current_indexes = [id_to_index[int(step["step_id"])] for step in batch]
+            for task_index in current_indexes:
+                for prerequisite_index in previous_batch_indexes:
+                    if prerequisite_index not in tasks[task_index]["schedule_after"]:
+                        tasks[task_index]["schedule_after"].append(prerequisite_index)
+            previous_batch_indexes.extend(current_indexes)
     return tasks
 
 

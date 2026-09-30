@@ -276,7 +276,13 @@ def execute_parallel_steps(
         # 串行批（单步骤）→ 直接执行
         if len(runnable) == 1:
             obs, files = _execute_single_step(
-                runnable[0], available_tool_names, session_id, step_results
+                runnable[0],
+                available_tool_names,
+                session_id,
+                step_results,
+                allowed_reference_ids=set(
+                    normalized_dependencies.get(int(runnable[0]["step_id"]), [])
+                ),
             )
             all_observations.extend(obs)
             all_output_files.extend(files)
@@ -297,6 +303,7 @@ def execute_parallel_steps(
                         available_tool_names,
                         session_id,
                         previous_results,
+                        set(normalized_dependencies.get(int(step["step_id"]), [])),
                     )
                     futures[future] = step
 
@@ -345,6 +352,7 @@ def _execute_single_step(
     available_tool_names: Set[str],
     session_id: str,
     previous_results: Optional[Dict[int, Any]] = None,
+    allowed_reference_ids: Optional[Set[int]] = None,
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
     """
     执行单个 Planner 步骤。
@@ -386,7 +394,11 @@ def _execute_single_step(
         }], [])
 
     try:
-        params = _resolve_step_references(dict(raw_params), previous_results or {})
+        params = _resolve_step_references(
+            dict(raw_params),
+            previous_results or {},
+            allowed_reference_ids=allowed_reference_ids,
+        )
     except ValueError as exc:
         return ([{
             "tool": tool_name,
@@ -480,15 +492,23 @@ def _execute_single_step(
 def _resolve_step_references(
     params: Any,
     previous_results: Dict[int, Any],
+    allowed_reference_ids: Optional[Set[int]] = None,
 ) -> Any:
     """解析参数中的 $step_N 引用为实际值。"""
     if isinstance(params, dict):
         return {
-            key: _resolve_step_references(value, previous_results)
+            key: _resolve_step_references(
+                value,
+                previous_results,
+                allowed_reference_ids,
+            )
             for key, value in params.items()
         }
     if isinstance(params, list):
-        return [_resolve_step_references(value, previous_results) for value in params]
+        return [
+            _resolve_step_references(value, previous_results, allowed_reference_ids)
+            for value in params
+        ]
     if not isinstance(params, str) or not params.startswith("$step_"):
         return params
 
@@ -496,6 +516,9 @@ def _resolve_step_references(
         step_id = int(params[len("$step_"):])
     except ValueError as exc:
         raise ValueError(f"无效步骤引用: {params}") from exc
+
+    if allowed_reference_ids is not None and step_id not in allowed_reference_ids:
+        raise ValueError(f"步骤引用未声明依赖: {params}")
 
     reference = previous_results.get(step_id)
     if not isinstance(reference, dict):

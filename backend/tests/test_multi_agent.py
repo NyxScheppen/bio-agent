@@ -16,6 +16,7 @@ from app.agent.bio_agent import (  # noqa: E402
     _run_delegated_tasks,
 )
 from app.agent.delegator_agent import _steps_to_sub_tasks  # noqa: E402
+from app.agent.executor_agent import _apply_skill_tool_filter  # noqa: E402
 from app.agent.parallel_executor import (  # noqa: E402
     _build_execution_batches,
     _resolve_step_references,
@@ -26,7 +27,12 @@ from app.agent.sub_agent_manager import (  # noqa: E402
     SubAgentResult,
     SubAgentTask,
 )
-from app.agent.tool_result import make_error_result, make_success_result  # noqa: E402
+from app.agent.skills.skill_models import SkillSpec  # noqa: E402
+from app.agent.tool_result import (  # noqa: E402
+    ResourceUsage,
+    make_error_result,
+    make_success_result,
+)
 
 
 def _assert(condition: bool, message: str = "") -> None:
@@ -89,6 +95,56 @@ def test_delegator_converts_ids_to_task_indexes() -> None:
     _assert_equal(tasks[1]["args"], {"path": "$step_0"})
 
 
+def test_delegator_preserves_parallel_group_allowlist() -> None:
+    steps = [
+        {"step_id": 1, "preferred_tools": ["a"], "parameters": {}},
+        {"step_id": 2, "preferred_tools": ["b"], "parameters": {}},
+        {"step_id": 3, "preferred_tools": ["c"], "parameters": {}},
+    ]
+    tasks = _steps_to_sub_tasks(steps, {}, [[1, 3]])
+    _assert_equal(tasks[0]["depends_on"], [])
+    _assert_equal(tasks[2]["depends_on"], [])
+    _assert_equal(tasks[1]["depends_on"], [])
+    _assert_equal(tasks[1]["schedule_after"], [0, 2])
+
+
+def test_orchestrator_schedule_barrier_does_not_cascade_failure() -> None:
+    from app.agent.orchestrator import Orchestrator
+
+    calls = []
+
+    class BatchManager(SubAgentManager):
+        def spawn_and_collect_all(
+            self,
+            tasks: list[SubAgentTask],
+            session_id: str = "",
+        ) -> list[SubAgentResult]:
+            calls.append([task.goal for task in tasks])
+            return [
+                SubAgentResult(
+                    task_index=index,
+                    goal=task.goal,
+                    tool=task.tool,
+                    status="error" if task.goal == "first" else "success",
+                    message="done",
+                )
+                for index, task in enumerate(tasks)
+            ]
+
+    orchestrator = Orchestrator(manager=BatchManager())
+    orchestrator.add_task("0", "first", "a")
+    orchestrator.add_task("1", "later", "b", schedule_after=["0", "2"])
+    orchestrator.add_task("2", "third", "c")
+    result = orchestrator.run_all()
+
+    _assert_equal(calls, [["first", "third"], ["later"]])
+    _assert_equal([item["task_id"] for item in result["failed"]], ["0"])
+    _assert_equal(
+        [item["task_id"] for item in result["completed"]],
+        ["1", "2"],
+    )
+
+
 def test_orchestrator_preserves_planner_parameters() -> None:
     from app.agent.orchestrator import Orchestrator
 
@@ -107,6 +163,7 @@ def test_orchestrator_preserves_planner_parameters() -> None:
 
 
 def test_delegated_tasks_reach_sub_agent_manager() -> None:
+    import app.agent.bio_agent as bio_module
     import app.agent.orchestrator as module
 
     calls = []
@@ -128,6 +185,7 @@ def test_delegated_tasks_reach_sub_agent_manager() -> None:
                 )
             ]
 
+    bio_module.TOOL_REGISTRY["demo"] = lambda x: x
     restore = _patched(module, "sub_agent_manager", CaptureManager())
     try:
         result = _run_delegated_tasks([
@@ -135,9 +193,48 @@ def test_delegated_tasks_reach_sub_agent_manager() -> None:
         ], "parent")
     finally:
         restore()
+        bio_module.TOOL_REGISTRY.pop("demo", None)
 
     _assert_equal(calls, [("demo", {"x": 1}, "parent")])
     _assert_equal(result["tool_observations"][0]["status"], "success")
+
+
+def test_delegation_enforces_skill_tool_policy() -> None:
+    import app.agent.bio_agent as module
+
+    calls = []
+    module.TOOL_REGISTRY["safe"] = lambda: None
+    module.TOOL_REGISTRY["unsafe"] = lambda: calls.append("unsafe")
+    skill = SkillSpec(
+        skill_id="restricted",
+        implementation_status="implemented",
+        allowed_tools=["safe"],
+        banned_tools=["unsafe"],
+    )
+    try:
+        result = _run_delegated_tasks([{
+            "goal": "must reject",
+            "tool": "unsafe",
+            "args": {},
+            "depends_on": [],
+        }], "parent", selected_skill=skill)
+    finally:
+        module.TOOL_REGISTRY.pop("safe", None)
+        module.TOOL_REGISTRY.pop("unsafe", None)
+
+    _assert_equal(calls, [])
+    _assert_equal(result["tool_observations"][0]["status"], "error")
+    _assert_equal(result["tool_observations"][0]["errors"], ["delegated_tool_not_allowed"])
+
+
+def test_skill_tool_policy_fails_closed() -> None:
+    schema = [{"type": "function", "function": {"name": "unsafe"}}]
+    skill = SkillSpec(
+        skill_id="restricted",
+        implementation_status="implemented",
+        allowed_tools=["safe"],
+    )
+    _assert_equal(_apply_skill_tool_filter(schema, skill), [])
 
 
 def test_sub_agent_invalid_and_cyclic_dependencies_are_blocked() -> None:
@@ -203,6 +300,32 @@ def test_sub_agent_retry_and_runtime() -> None:
     _assert_equal(calls, [17, 17])
     _assert_equal((result.status, result.attempts), ("success", 2))
     _assert(result.runtime_seconds >= 0)
+
+
+def test_sub_agent_timeout_is_never_retried() -> None:
+    import app.agent.sub_agent_manager as module
+
+    calls = []
+    module.TOOL_REGISTRY["slow"] = lambda: None
+
+    def fake_runner(**kwargs: Any) -> Any:
+        calls.append(kwargs["tool_name"])
+        result = make_error_result("timeout")
+        result.provenance.resource_usage = ResourceUsage(timeout_triggered=True)
+        return result
+
+    restore = _patched(module, "run_tool_with_lifecycle", fake_runner)
+    try:
+        result = SubAgentManager().spawn_and_collect_all([
+            SubAgentTask(goal="slow", tool="slow", max_retries=3),
+        ])[0]
+    finally:
+        restore()
+        module.TOOL_REGISTRY.pop("slow", None)
+
+    _assert_equal(calls, ["slow"])
+    _assert_equal((result.status, result.attempts), ("timeout", 1))
+    _assert_equal(SubAgentTask().max_retries, 0)
 
 
 def test_parallel_groups_and_cycle_validation() -> None:
@@ -288,6 +411,65 @@ def test_nested_step_references_are_strict() -> None:
     except ValueError:
         return
     raise AssertionError("unknown reference should fail")
+
+
+def test_step_reference_requires_declared_dependency() -> None:
+    previous = {
+        1: {
+            "status": "success",
+            "result_summary": "summary",
+            "output_files": [],
+        }
+    }
+    try:
+        _resolve_step_references(
+            {"path": "$step_1"},
+            previous,
+            allowed_reference_ids=set(),
+        )
+    except ValueError as exc:
+        _assert("未声明依赖" in str(exc))
+    else:
+        raise AssertionError("undeclared reference should fail")
+
+
+def test_orchestrator_blocks_undeclared_step_reference() -> None:
+    from app.agent.orchestrator import Orchestrator
+
+    calls = []
+
+    class CaptureManager(SubAgentManager):
+        def spawn_and_collect_all(
+            self,
+            tasks: list[SubAgentTask],
+            session_id: str = "",
+        ) -> list[SubAgentResult]:
+            calls.append([task.goal for task in tasks])
+            return [
+                SubAgentResult(
+                    task_index=index,
+                    goal=task.goal,
+                    tool=task.tool,
+                    status="success",
+                    message="done",
+                )
+                for index, task in enumerate(tasks)
+            ]
+
+    orchestrator = Orchestrator(manager=CaptureManager())
+    orchestrator.add_task("0", "source", "source_tool")
+    orchestrator.add_task(
+        "1",
+        "consumer",
+        "consumer_tool",
+        args={"path": "$step_0"},
+    )
+    result = orchestrator.run_all()
+
+    _assert_equal(calls, [["source"]])
+    _assert_equal([item["task_id"] for item in result["completed"]], ["0"])
+    _assert_equal([item["task_id"] for item in result["blocked"]], ["1"])
+    _assert("未声明依赖" in result["blocked"][0]["reason"])
 
 
 def test_racing_returns_first_success() -> None:

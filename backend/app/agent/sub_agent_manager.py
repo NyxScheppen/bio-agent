@@ -36,7 +36,7 @@ class SubAgentTask(BaseModel):
     tool: str = ""                      # 工具名
     args: Dict[str, Any] = Field(default_factory=dict)
     depends_on: List[int] = Field(default_factory=list)  # 依赖的任务索引
-    max_retries: int = Field(default=1, ge=0, le=3)
+    max_retries: int = Field(default=0, ge=0, le=3)
     timeout: int = Field(default=600, ge=10, le=3600)
 
 
@@ -220,6 +220,10 @@ class SubAgentManager:
                     timeout_override=task.timeout,
                 )
                 status = result_status(result) or "success"
+                provenance = getattr(result, "provenance", None)
+                resource_usage = getattr(provenance, "resource_usage", None)
+                if getattr(resource_usage, "timeout_triggered", False):
+                    break
                 if status != "error":
                     break
             except Exception as exc:

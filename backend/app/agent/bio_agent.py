@@ -26,6 +26,8 @@ from app.agent.skills.skill_models import SkillSpec
 from app.agent.skills.skill_registry import SKILL_REGISTRY
 from app.agent.skills.skill_router import select_skill
 from app.agent.skills.builtin_skills import register_all_builtin_skills
+from app.agent.skills.tool_policy import allowed_tool_names_for_skill
+from app.agent.tool_registry import TOOL_REGISTRY
 
 # 触发 tools 下所有模块的工具注册
 from app import tools  # noqa
@@ -93,17 +95,43 @@ def _normalize_execution_mode(value: Any) -> str:
 def _run_delegated_tasks(
     sub_tasks: List[Dict[str, Any]],
     session_id: str,
+    selected_skill: Optional[SkillSpec] = None,
 ) -> Dict[str, Any]:
     """将 Delegator 输出交给 Orchestrator 执行并转换为 Executor 协议。"""
+    allowed_tools = allowed_tool_names_for_skill(selected_skill, TOOL_REGISTRY)
+    disallowed_tools = sorted({
+        str(task.get("tool", ""))
+        for task in sub_tasks
+        if str(task.get("tool", "")) not in allowed_tools
+    })
+    if disallowed_tools:
+        message = f"Skill 工具策略拒绝委派工具: {disallowed_tools}"
+        return {
+            "executor_text": message,
+            "tool_observations": [{
+                "tool": "skill_tool_policy",
+                "args": {},
+                "result_summary": message,
+                "output_files": [],
+                "status": "error",
+                "errors": ["delegated_tool_not_allowed"],
+            }],
+            "output_files": [],
+        }
+
     orchestrator = Orchestrator()
     for index, task in enumerate(sub_tasks):
         dependencies = [str(dep) for dep in task.get("depends_on", [])]
+        schedule_after = [str(dep) for dep in task.get("schedule_after", [])]
         orchestrator.add_task(
             task_id=str(index),
             name=str(task.get("goal", "")),
             tool=str(task.get("tool", "")),
             args=dict(task.get("args", {}) or {}),
             depends_on=dependencies,
+            schedule_after=schedule_after,
+            max_retries=max(0, min(int(task.get("max_retries", 0) or 0), 3)),
+            timeout=max(10, min(int(task.get("timeout", 600) or 600), 3600)),
         )
 
     result = orchestrator.run_all(session_id=session_id)
@@ -187,7 +215,11 @@ def _run_bio_agent_sync(
         complexity = router_result.get("complexity", "")
         steps = planner_result.get("steps", [])
         if complexity in ("complex",) and len(steps) >= 3:
-            delegator_result = run_delegator_agent(context_pack, planner_result)
+            delegator_result = run_delegator_agent(
+                context_pack,
+                planner_result,
+                selected_skill=selected_skill,
+            )
             print(f"\n🔀 [Delegator] {json.dumps(delegator_result, ensure_ascii=False, default=str)}")
             if delegator_result.get("should_delegate"):
                 planner_result["delegate_to_sub_agents"] = True
@@ -274,6 +306,7 @@ def _run_bio_agent_sync(
         executor_result = _run_delegated_tasks(
             planner_result["sub_tasks"],
             session_id or "",
+            selected_skill=selected_skill,
         )
     else:
         executor_result = run_executor_agent(

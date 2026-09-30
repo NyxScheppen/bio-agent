@@ -81,6 +81,7 @@ Router 或 Planner 的 LLM 调用报错、返回空对象或无法解析时，�
 2. 有输出文件时，使用第一个文件的 `relative_path`，其次使用 `url`。
 3. 没有文件时，使用 `result_summary`。
 4. 引用不存在、前置步骤失败或没有可传递结果时，当前步骤标记为 `blocked`。
+5. 引用的步骤必须同时出现在当前步骤的 `depends_on` / `step_dependencies` 中；不能用参数引用隐式建立依赖。
 
 引用只在整个字符串等于 `$step_N` 时生效；`"prefix-$step_1"` 不会被替换。
 
@@ -100,6 +101,10 @@ Delegator 输出的 `sub_tasks` 使用零基索引声明 `depends_on`。系统�
 - `depends_on` 必须是列表，只能引用现有索引，不能依赖自身。
 
 任一子任务无效时，本轮委派整体拒绝，回到普通 Executor 路径。Planner 步骤转换成子任务时，原始 `step_id` 和 `$step_N` 会一起映射为零基子任务索引。
+
+Skill 工具策略贯穿普通 Executor、确定性并行路径和委派路径。`allowed_tools` 是白名单，`banned_tools` 始终优先；过滤结果为空时执行会被拒绝，不会回退到全局工具表。Delegator 的工具即使存在于 `TOOL_REGISTRY`，只要不在当前 Skill 策略内，整轮委派也会被拒绝。
+
+Planner 已提供 `parallel_groups` 时，Delegator 会把并行白名单转换成独立的 `schedule_after` 批次屏障：同组任务可并发，未列入组的任务保持单独批次，不会因为 `depends_on=[]` 而混入同一轮。屏障只等待前一批进入终态，不会把调度顺序误当成成功依赖；失败级联仍只由 `depends_on` 决定。
 
 ## 6. 调度和状态传播
 
@@ -128,11 +133,11 @@ SubAgentResult 状态包括 `success`、`partial`、`error`、`timeout` 和 `blo
 
 ## 7. 重试和超时
 
-`SubAgentTask` 默认 `max_retries=1`，即首次执行失败后最多再执行一次；允许范围为 0 到 3。`timeout` 范围为 10 到 3600 秒，默认 600 秒。
+`SubAgentTask` 默认 `max_retries=0`，即默认至多执行一次；显式重试范围为 0 到 3。`timeout` 范围为 10 到 3600 秒，默认 600 秒。Delegator 的 LLM 输出统一归零为 `max_retries=0`，不能自行提升副作用工具的重试次数。
 
 重试具有至少一次执行语义。可能产生外部副作用的工具应设置 `max_retries=0`，或者由工具自身实现幂等键。只有最终结果会写入 SubAgentResult，`attempts` 记录实际尝试次数。
 
-Python 线程无法被安全强杀。超时后生命周期包装器会立即停止等待、取消尚未开始的 Future 并返回 `timeout/error`；已经运行的线程可能继续到工具函数自行结束。调用外部进程、网络或 R 的工具仍必须实现自身的进程级或请求级超时。
+Python 线程无法被安全强杀。超时后生命周期包装器会立即停止等待、取消尚未开始的 Future 并返回 `timeout/error`；已经运行的线程可能继续到工具函数自行结束。SubAgentManager 检测到超时标记后绝不启动重试，即使任务显式配置了重试次数。调用外部进程、网络或 R 的工具仍必须实现自身的进程级或请求级超时。
 
 ## 8. 依赖感知并行
 

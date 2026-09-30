@@ -42,21 +42,30 @@ class KanbanTask:
         tool: str,
         args: Optional[Dict[str, Any]] = None,
         depends_on: Optional[List[str]] = None,
+        schedule_after: Optional[List[str]] = None,
+        max_retries: int = 0,
+        timeout: int = 600,
     ):
         self.task_id = task_id
         self.name = name
         self.tool = tool
         self.args = args or {}
         self.depends_on = depends_on or []
+        self.schedule_after = schedule_after or []
+        self.max_retries = max_retries
+        self.timeout = timeout
         self.status: TaskStatus = TaskStatus.TODO
         self.result: Optional[SubAgentResult] = None
         self.error: Optional[str] = None
 
-    def can_start(self, completed_ids: set) -> bool:
+    def can_start(self, completed_ids: set, terminal_ids: set) -> bool:
         """检查所有依赖是否已完成。"""
         if self.status != TaskStatus.TODO:
             return False
-        return all(dep in completed_ids for dep in self.depends_on)
+        return (
+            all(dep in completed_ids for dep in self.depends_on)
+            and all(dep in terminal_ids for dep in self.schedule_after)
+        )
 
     def mark_blocked(self, reason: str = "依赖任务失败") -> None:
         """标记为阻塞（依赖任务失败）。"""
@@ -92,6 +101,9 @@ class Orchestrator:
         tool: str,
         args: Optional[Dict[str, Any]] = None,
         depends_on: Optional[List[str]] = None,
+        schedule_after: Optional[List[str]] = None,
+        max_retries: int = 0,
+        timeout: int = 600,
     ) -> "Orchestrator":
         """添加一个任务到 Kanban 板。"""
         self.tasks[task_id] = KanbanTask(
@@ -100,6 +112,9 @@ class Orchestrator:
             tool=tool,
             args=args,
             depends_on=depends_on,
+            schedule_after=schedule_after,
+            max_retries=max_retries,
+            timeout=timeout,
         )
         return self  # 链式调用
 
@@ -125,6 +140,8 @@ class Orchestrator:
                 tool=tools[0] if tools else "",
                 args=dict(s.get("parameters", {}) or {}),
                 depends_on=[str(d) for d in deps],
+                max_retries=int(s.get("max_retries", 0) or 0),
+                timeout=int(s.get("timeout", 600) or 600),
             )
         return self
 
@@ -158,7 +175,9 @@ class Orchestrator:
             for tid, task in self.tasks.items():
                 if task.status == TaskStatus.TODO:
                     unknown_dependencies = [
-                        dep for dep in task.depends_on if dep not in self.tasks
+                        dep
+                        for dep in task.depends_on + task.schedule_after
+                        if dep not in self.tasks
                     ]
                     if unknown_dependencies:
                         task.mark_blocked(f"未知依赖: {unknown_dependencies}")
@@ -175,7 +194,8 @@ class Orchestrator:
                         blocked_ids.add(tid)
                         continue
 
-                    if task.can_start(completed_ids):
+                    terminal_ids = completed_ids | failed_ids | blocked_ids
+                    if task.can_start(completed_ids, terminal_ids):
                         ready.append(task)
 
             if not ready:
@@ -193,14 +213,30 @@ class Orchestrator:
             # 构建 SubAgentTask 列表
             sub_tasks = []
             task_id_map = {}
-            for i, task in enumerate(ready):
+            for task in ready:
+                try:
+                    resolved_args = self._resolve_task_references(
+                        task.args,
+                        declared_dependencies=set(task.depends_on),
+                    )
+                except ValueError as exc:
+                    task.mark_blocked(str(exc))
+                    blocked_ids.add(task.task_id)
+                    continue
+
+                sub_task_index = len(sub_tasks)
                 sub_tasks.append(SubAgentTask(
                     goal=task.name,
                     tool=task.tool,
-                    args=self._resolve_task_references(task.args),
+                    args=resolved_args,
+                    max_retries=task.max_retries,
+                    timeout=task.timeout,
                 ))
-                task_id_map[i] = task.task_id
+                task_id_map[sub_task_index] = task.task_id
                 task.status = TaskStatus.IN_PROGRESS
+
+            if not sub_tasks:
+                continue
 
             # 并行执行
             results = self._manager.spawn_and_collect_all(sub_tasks, session_id)
@@ -270,29 +306,54 @@ class Orchestrator:
             "all_output_files": _collect_all_files(completed),
         }
 
-    def _resolve_task_references(self, value: Any) -> Any:
+    def _resolve_task_references(
+        self,
+        value: Any,
+        *,
+        declared_dependencies: Optional[set[str]] = None,
+    ) -> Any:
         """解析参数中指向已完成任务的精确 ``$step_ID`` 引用。"""
         if isinstance(value, dict):
             return {
-                key: self._resolve_task_references(item)
+                key: self._resolve_task_references(
+                    item,
+                    declared_dependencies=declared_dependencies,
+                )
                 for key, item in value.items()
             }
         if isinstance(value, list):
-            return [self._resolve_task_references(item) for item in value]
+            return [
+                self._resolve_task_references(
+                    item,
+                    declared_dependencies=declared_dependencies,
+                )
+                for item in value
+            ]
         if not isinstance(value, str) or not value.startswith("$step_"):
             return value
 
         task_id = value[len("$step_"):]
         dependency = self.tasks.get(task_id)
-        if not dependency or not dependency.result:
-            return value
+        if not dependency:
+            raise ValueError(f"步骤引用不存在: {value}")
+        if declared_dependencies is not None and task_id not in declared_dependencies:
+            raise ValueError(f"步骤引用未声明依赖: {value}")
+        if not dependency.result:
+            raise ValueError(f"步骤引用尚不可用: {value}")
+        if dependency.result.status != "success":
+            raise ValueError(f"步骤引用未成功: {value}")
 
         result = to_plain_dict(dependency.result) or {}
         files = result.get("output_files", []) or []
         if files:
             first_file = files[0]
-            return first_file.get("relative_path") or first_file.get("url") or value
-        return result.get("message") or value
+            resolved_path = first_file.get("relative_path") or first_file.get("url")
+            if resolved_path:
+                return resolved_path
+        message = result.get("message")
+        if message:
+            return message
+        raise ValueError(f"步骤引用没有可传递结果: {value}")
 
 
 def _collect_all_files(completed_tasks: List[KanbanTask]) -> List[Dict[str, Any]]:

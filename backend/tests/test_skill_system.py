@@ -249,8 +249,8 @@ def test_executor_skill_allowed_tools():
     print("[PASS] test_executor_skill_allowed_tools")
 
 
-def test_executor_skill_allowed_tools_empty_fallback():
-    """当 skill.allowed_tools 过滤后为空时，应 fallback 到原 schema。"""
+def test_executor_skill_allowed_tools_empty_fails_closed():
+    """当 Skill 白名单过滤后为空时，应拒绝执行。"""
     from app.agent.executor_agent import _apply_skill_tool_filter
 
     class FakeSkill:
@@ -262,11 +262,9 @@ def test_executor_skill_allowed_tools_empty_fallback():
     ]
 
     filtered = _apply_skill_tool_filter(mock_schema, FakeSkill())
-    # Should fallback to original
-    _assert_equal(len(filtered), 1)
-    _assert_equal(filtered[0]["function"]["name"], "some_other_tool")
+    _assert_equal(filtered, [])
 
-    print("[PASS] test_executor_skill_allowed_tools_empty_fallback")
+    print("[PASS] test_executor_skill_allowed_tools_empty_fails_closed")
 
 
 # ============================================================
@@ -276,10 +274,9 @@ def test_executor_skill_allowed_tools_empty_fallback():
 def test_skill_registry_operations():
     """测试 get_skill / find_skills_by_category / find_skills_by_task_type。"""
     from app.agent.skills.skill_registry import (
-        SKILL_REGISTRY, register_skill, get_skill,
+        SKILL_REGISTRY, get_skill,
         find_skills_by_category, find_skills_by_task_type,
     )
-    from app.agent.skills.skill_models import SkillSpec
     from app.agent.skills.builtin_skills import register_all_builtin_skills
 
     SKILL_REGISTRY.clear()
@@ -365,7 +362,10 @@ if __name__ == "__main__":
         ("test_skill_no_match_fallback", test_skill_no_match_fallback),
         ("test_planner_receives_skill", test_planner_receives_skill),
         ("test_executor_skill_allowed_tools", test_executor_skill_allowed_tools),
-        ("test_executor_skill_allowed_tools_empty_fallback", test_executor_skill_allowed_tools_empty_fallback),
+        (
+            "test_executor_skill_allowed_tools_empty_fails_closed",
+            test_executor_skill_allowed_tools_empty_fails_closed,
+        ),
         ("test_skill_registry_operations", test_skill_registry_operations),
         ("test_skill_spec_fields", test_skill_spec_fields),
     ]

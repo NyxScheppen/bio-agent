@@ -1,6 +1,6 @@
 import json
 import hashlib
-from typing import Any, Dict
+from typing import Any, Dict, cast
 
 from app.core.config import MODEL_NAME
 from app.agent.llm_client import client
@@ -8,12 +8,12 @@ from app.agent.task_prompts import EXECUTOR_ROLE_PROMPT, build_domain_prompt
 from app.agent.tool_registry import TOOL_REGISTRY, get_tool_meta
 from typing import Optional as Opt
 from app.agent.skills.skill_models import SkillSpec
+from app.agent.skills.tool_policy import filter_tool_schema_for_skill
 from app.agent.category_router import resolve_tool_categories, filter_tools_schema_by_plan
 from app.agent.tool_result import make_error_result
 from app.agent.tool_runner import run_tool_with_lifecycle, execute_recovery_strategies
 from app.agent.agent_constants import (
     FEATURE_FLAGS,
-    MAX_TOOL_TIMEOUT_SECONDS,
 )
 from app.agent.agent_utils import (
     safe_json_loads,
@@ -49,7 +49,10 @@ FATAL_TOOL_ERROR_KEYWORDS = [
 ]
 
 
-def make_error_result_from_nonexistent_tool(function_name: str, session_id: str = None) -> Any:
+def make_error_result_from_nonexistent_tool(
+    function_name: str,
+    session_id: Opt[str] = None,
+) -> Any:
     """
     工具不存在时构造标准 error ToolResult。
 
@@ -73,43 +76,14 @@ def _apply_skill_tool_filter(
     2. 如果 skill 有 allowed_tools → 只暴露白名单内的工具
     3. 如果 skill 有 banned_tools → 排除黑名单工具
     4. 对于 planned skill 且 allowed_tools 为空 → 只允许 file_io 类的工具
-    5. 过滤后为空 → fallback 到原始 schema
+    5. 过滤后为空 → 返回空列表，由调用方拒绝执行
     """
-    if not skill or not hasattr(skill, "allowed_tools"):
-        return tools_schema
-
-    allowed = set(skill.allowed_tools or [])
-    status = getattr(skill, "implementation_status", "planned")
-
-    # planned skill 无显式工具时，只暴露已注册的 file_io 工具
-    if status == "planned" and not allowed:
-        from app.agent.tool_registry import TOOL_META
-        allowed = {
-            name for name, meta in TOOL_META.items()
-            if meta.get("category") == "file_io"
-        }
-
-    # 仍然为空 → 不过滤
-    if not allowed:
-        return tools_schema
-
-    banned = set(skill.banned_tools or [])
-    filtered = []
-    for item in tools_schema or []:
-        fn = item.get("function", {})
-        name = fn.get("name", "")
-        if name in allowed and name not in banned:
-            filtered.append(item)
-
-    if filtered:
-        print(
-            f"[Executor] Skill tool filter: {len(tools_schema)} -> "
-            f"{len(filtered)} (status={status})"
-        )
-        return filtered
-
-    print("[Executor] Skill tool filter resulted in empty, falling back")
-    return tools_schema
+    filtered = filter_tool_schema_for_skill(tools_schema, skill)
+    print(
+        f"[Executor] Skill tool filter: {len(tools_schema)} -> "
+        f"{len(filtered)} (status={getattr(skill, 'implementation_status', 'planned')})"
+    )
+    return filtered
 
 
 def build_executor_messages(
@@ -363,9 +337,10 @@ def run_executor_agent(
     context_pack: Dict[str, Any],
     router_result: Dict[str, Any],
     planner_result: Dict[str, Any],
-    session_id: str = None,
+    session_id: Opt[str] = None,
     selected_skill: Opt[SkillSpec] = None,
 ) -> Dict[str, Any]:
+    session_id = session_id or ""
     messages = build_executor_messages(context_pack, router_result, planner_result)
 
     executor_tools_schema = filter_tools_schema_by_plan(
@@ -375,11 +350,27 @@ def run_executor_agent(
     )
 
     # --- Skill 工具白名单限制 ---
-    if selected_skill and selected_skill.allowed_tools:
+    if selected_skill:
         executor_tools_schema = _apply_skill_tool_filter(
             executor_tools_schema,
             selected_skill,
         )
+
+    if selected_skill and not executor_tools_schema:
+        return {
+            "executor_text": sanitize_final_answer(
+                f"Skill `{selected_skill.skill_id}` 没有允许执行的工具，已拒绝本次执行。"
+            ),
+            "tool_observations": [{
+                "tool": "skill_tool_policy",
+                "args": {},
+                "result_summary": "Skill 工具策略过滤后为空",
+                "output_files": [],
+                "status": "error",
+                "errors": ["no_skill_allowed_tools"],
+            }],
+            "output_files": [],
+        }
 
     print(
         "\n🧰 [Executor Tools] "
@@ -437,14 +428,14 @@ def run_executor_agent(
         response = client.chat.completions.create(
             model=MODEL_NAME,
             messages=messages,
-            tools=executor_tools_schema,
+            tools=cast(Any, executor_tools_schema),
             tool_choice="auto",
             temperature=0
         )
 
         response_message = response.choices[0].message
 
-        assistant_message = {
+        assistant_message: Dict[str, Any] = {
             "role": "assistant",
             "content": response_message.content or ""
         }
@@ -455,8 +446,8 @@ def run_executor_agent(
                     "id": tool_call.id,
                     "type": tool_call.type,
                     "function": {
-                        "name": tool_call.function.name,
-                        "arguments": tool_call.function.arguments or "{}"
+                        "name": cast(Any, tool_call).function.name,
+                        "arguments": cast(Any, tool_call).function.arguments or "{}"
                     }
                 }
                 for tool_call in response_message.tool_calls
@@ -469,8 +460,10 @@ def run_executor_agent(
             break
 
         for tool_call in response_message.tool_calls:
-            function_name = tool_call.function.name
-            function_args = safe_json_loads(tool_call.function.arguments or "{}")
+            function_name = cast(Any, tool_call).function.name
+            function_args = safe_json_loads(
+                cast(Any, tool_call).function.arguments or "{}"
+            )
 
             # ---- Phase 4.1: 空转检测 ----
             fingerprint = _make_call_fingerprint(function_name, function_args)
@@ -487,9 +480,18 @@ def run_executor_agent(
             print(f"\n👉 [Executor] 调用工具: {function_name}")
             print(f"👉 [原始参数] {function_args}")
 
-            func = TOOL_REGISTRY.get(function_name)
+            func = (
+                TOOL_REGISTRY.get(function_name)
+                if function_name in available_tool_names_set
+                else None
+            )
 
-            if not func:
+            if function_name not in available_tool_names_set:
+                normalized_result = make_error_result(
+                    message=f"工具 `{function_name}` 不在当前执行策略允许范围内",
+                    errors=[f"tool_not_allowed: {function_name}"],
+                )
+            elif not func:
                 # 工具不存在，直接构造 error
                 normalized_result = make_error_result_from_nonexistent_tool(
                     function_name, session_id

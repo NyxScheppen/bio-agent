@@ -1,3 +1,6 @@
+from urllib.parse import quote
+
+
 def detect_file_type(filename: str) -> str:
     """
     根据扩展名判断文件类型。
@@ -16,4 +19,4 @@ def build_file_url(relative_path: str) -> str:
     例如 generated/pheno_analysis/a.png -> /files/generated/pheno_analysis/a.png
     """
     clean_path = str(relative_path).replace("\\", "/").lstrip("/")
-    return f"/files/{clean_path}"
+    return f"/files/{quote(clean_path, safe='/')}"

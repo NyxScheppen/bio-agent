@@ -1,7 +1,7 @@
 from app.db.models import ChatSession, ChatMessage, StoredFile
 from sqlalchemy import func, distinct
 
-def create_session(db, session_id: str, title: str = "新会话"):
+def create_session(db, session_id: str, title: str = "新会话", commit: bool = True):
     """
     若会话不存在则创建，会话已存在就直接返回
     """
@@ -11,8 +11,11 @@ def create_session(db, session_id: str, title: str = "新会话"):
 
     session = ChatSession(session_id=session_id, title=title)
     db.add(session)
-    db.commit()
-    db.refresh(session)
+    if commit:
+        db.commit()
+        db.refresh(session)
+    else:
+        db.flush()
     return session
 
 def get_session(db, session_id: str):
@@ -77,7 +80,8 @@ def save_file_record(
     filename: str,
     relative_path: str,
     file_type: str,
-    source_type: str
+    source_type: str,
+    commit: bool = True,
 ):
     """
     保存文件记录
@@ -94,9 +98,38 @@ def save_file_record(
         source_type=source_type
     )
     db.add(file_obj)
-    db.commit()
-    db.refresh(file_obj)
+    if commit:
+        db.commit()
+        db.refresh(file_obj)
+    else:
+        db.flush()
     return file_obj
+
+
+def delete_file_record_by_path(
+    db,
+    session_id: str,
+    relative_path: str,
+    source_type: str | None = None,
+):
+    query = db.query(StoredFile).filter(
+        StoredFile.session_id == session_id,
+        StoredFile.relative_path == relative_path,
+    )
+    if source_type:
+        query = query.filter(StoredFile.source_type == source_type)
+    return query.delete(synchronize_session=False)
+
+
+def count_other_file_references(db, session_id: str, relative_path: str) -> int:
+    return (
+        db.query(StoredFile)
+        .filter(
+            StoredFile.session_id != session_id,
+            StoredFile.relative_path == relative_path,
+        )
+        .count()
+    )
 
 def get_session_files(db, session_id: str):
     """
@@ -107,6 +140,17 @@ def get_session_files(db, session_id: str):
         .filter(StoredFile.session_id == session_id)
         .order_by(StoredFile.id.desc())
         .all()
+    )
+
+
+def get_file_record_by_path(db, session_id: str, relative_path: str):
+    return (
+        db.query(StoredFile)
+        .filter(
+            StoredFile.session_id == session_id,
+            StoredFile.relative_path == relative_path,
+        )
+        .first()
     )
 
 def get_files_by_session(db, session_id: str):

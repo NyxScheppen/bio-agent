@@ -1,5 +1,13 @@
+import math
+
 from app.agent.tool_registry import register_tool
-from app.tools.r_tools import run_r_analysis
+from app.tools.r_tools import (
+    run_r_analysis,
+    r_character_vector,
+    r_escape_string_content,
+    validate_r_column_name,
+    validate_r_column_names,
+)
 from app.tools.r_preprocess_templates import build_expression_preprocess_r
 
 
@@ -39,9 +47,17 @@ def run_single_gene_survival_analysis(
     gene: str,
     time_col: str,
     status_col: str,
-    expression_preprocess: str = "auto"
+    expression_preprocess: str = "auto",
+    job_dir: str = None,
 ):
+    gene = validate_r_column_name(gene)
+    time_col = validate_r_column_name(time_col)
+    status_col = validate_r_column_name(status_col)
     preprocess_r = build_expression_preprocess_r(f'c("{gene}")', expression_preprocess)
+    file_path = r_escape_string_content(file_path)
+    gene = r_escape_string_content(gene)
+    time_col = r_escape_string_content(time_col)
+    status_col = r_escape_string_content(status_col)
 
     r_code = f'''
 library(data.table)
@@ -106,7 +122,7 @@ write.csv(df, "single_gene_survival_processed.csv", row.names = FALSE)
 
 cat("生成文件: preprocess_log2_info.csv, single_gene_km.png, single_gene_cox_result.csv, single_gene_survival_processed.csv\\n")
 '''
-    return run_r_analysis(r_code)
+    return run_r_analysis(r_code, job_subdir="single_gene_survival", job_dir=job_dir)
 
 
 @register_tool(
@@ -137,10 +153,17 @@ def run_univariate_cox_batch(
     feature_cols: list,
     time_col: str,
     status_col: str,
-    expression_preprocess: str = "auto"
+    expression_preprocess: str = "auto",
+    job_dir: str = None,
 ):
-    feature_cols_r = "c(" + ", ".join([f'"{x}"' for x in feature_cols]) + ")"
+    feature_cols = validate_r_column_names(feature_cols)
+    time_col = validate_r_column_name(time_col)
+    status_col = validate_r_column_name(status_col)
+    feature_cols_r = r_character_vector(feature_cols)
     preprocess_r = build_expression_preprocess_r(feature_cols_r, expression_preprocess)
+    file_path = r_escape_string_content(file_path)
+    time_col = r_escape_string_content(time_col)
+    status_col = r_escape_string_content(status_col)
 
     r_code = f'''
 library(data.table)
@@ -207,7 +230,7 @@ ggsave("univariate_cox_forest.png", p, width = 8, height = 6, dpi = 150)
 
 cat("生成文件: preprocess_log2_info.csv, univariate_cox_results.csv, univariate_cox_forest.png\\n")
 '''
-    return run_r_analysis(r_code)
+    return run_r_analysis(r_code, job_subdir="univariate_cox", job_dir=job_dir)
 
 
 @register_tool(
@@ -238,10 +261,17 @@ def run_lasso_cox_model(
     feature_cols: list,
     time_col: str,
     status_col: str,
-    expression_preprocess: str = "auto"
+    expression_preprocess: str = "auto",
+    job_dir: str = None,
 ):
-    feature_cols_r = "c(" + ", ".join([f'"{x}"' for x in feature_cols]) + ")"
+    feature_cols = validate_r_column_names(feature_cols)
+    time_col = validate_r_column_name(time_col)
+    status_col = validate_r_column_name(status_col)
+    feature_cols_r = r_character_vector(feature_cols)
     preprocess_r = build_expression_preprocess_r(feature_cols_r, expression_preprocess)
+    file_path = r_escape_string_content(file_path)
+    time_col = r_escape_string_content(time_col)
+    status_col = r_escape_string_content(status_col)
 
     r_code = f'''
 library(data.table)
@@ -291,7 +321,7 @@ write.csv(coef_df, "lasso_selected_features.csv", row.names = FALSE)
 
 cat("生成文件: preprocess_log2_info.csv, lasso_cv_curve.png, lasso_coef_path.png, lasso_selected_features.csv\\n")
 '''
-    return run_r_analysis(r_code)
+    return run_r_analysis(r_code, job_subdir="lasso_cox", job_dir=job_dir)
 
 
 @register_tool(
@@ -322,10 +352,17 @@ def run_multivariate_cox_analysis(
     feature_cols: list,
     time_col: str,
     status_col: str,
-    expression_preprocess: str = "auto"
+    expression_preprocess: str = "auto",
+    job_dir: str = None,
 ):
-    feature_cols_r = "c(" + ", ".join([f'"{x}"' for x in feature_cols]) + ")"
+    feature_cols = validate_r_column_names(feature_cols)
+    time_col = validate_r_column_name(time_col)
+    status_col = validate_r_column_name(status_col)
+    feature_cols_r = r_character_vector(feature_cols)
     preprocess_r = build_expression_preprocess_r(feature_cols_r, expression_preprocess)
+    file_path = r_escape_string_content(file_path)
+    time_col = r_escape_string_content(time_col)
+    status_col = r_escape_string_content(status_col)
 
     r_code = f'''
 library(data.table)
@@ -367,7 +404,7 @@ res_df <- data.frame(
 write.csv(res_df, "multivariate_cox_results.csv", row.names = FALSE)
 cat("生成文件: preprocess_log2_info.csv, multivariate_cox_results.csv\\n")
 '''
-    return run_r_analysis(r_code, job_subdir="multivariate_cox")
+    return run_r_analysis(r_code, job_subdir="multivariate_cox", job_dir=job_dir)
 
 
 @register_tool(
@@ -398,10 +435,17 @@ def run_prognostic_risk_model(
     feature_cols: list,
     time_col: str,
     status_col: str,
-    expression_preprocess: str = "auto"
+    expression_preprocess: str = "auto",
+    job_dir: str = None,
 ):
-    feature_cols_r = "c(" + ", ".join([f'"{x}"' for x in feature_cols]) + ")"
+    feature_cols = validate_r_column_names(feature_cols)
+    time_col = validate_r_column_name(time_col)
+    status_col = validate_r_column_name(status_col)
+    feature_cols_r = r_character_vector(feature_cols)
     preprocess_r = build_expression_preprocess_r(feature_cols_r, expression_preprocess)
+    file_path = r_escape_string_content(file_path)
+    time_col = r_escape_string_content(time_col)
+    status_col = r_escape_string_content(status_col)
 
     r_code = f'''
 library(data.table)
@@ -475,7 +519,7 @@ write.csv(coef_df, "risk_model_coefficients.csv", row.names = FALSE)
 
 cat("生成文件: preprocess_log2_info.csv, risk_model_scored_data.csv, risk_score_distribution.png, risk_survival_status.png, risk_model_heatmap.png, risk_model_coefficients.csv\\n")
 '''
-    return run_r_analysis(r_code, job_subdir="risk_model")
+    return run_r_analysis(r_code, job_subdir="risk_model", job_dir=job_dir)
 
 
 @register_tool(
@@ -496,7 +540,17 @@ cat("生成文件: preprocess_log2_info.csv, risk_model_scored_data.csv, risk_sc
         "required": ["file_path", "time_col", "status_col"]
     }
 )
-def run_risk_group_survival_analysis(file_path: str, time_col: str, status_col: str, risk_group_col: str = "risk_group"):
+def run_risk_group_survival_analysis(
+    file_path: str,
+    time_col: str,
+    status_col: str,
+    risk_group_col: str = "risk_group",
+    job_dir: str = None,
+):
+    file_path = r_escape_string_content(file_path)
+    time_col = r_escape_string_content(validate_r_column_name(time_col))
+    status_col = r_escape_string_content(validate_r_column_name(status_col))
+    risk_group_col = r_escape_string_content(validate_r_column_name(risk_group_col))
     r_code = f'''
 library(data.table)
 library(survival)
@@ -529,7 +583,7 @@ dev.off()
 
 cat("生成文件: risk_group_km.png\\n")
 '''
-    return run_r_analysis(r_code, job_subdir="risk_group_km")
+    return run_r_analysis(r_code, job_subdir="risk_group_km", job_dir=job_dir)
 
 
 @register_tool(
@@ -551,9 +605,22 @@ cat("生成文件: risk_group_km.png\\n")
         "required": ["file_path", "time_col", "status_col", "score_col", "times"]
     }
 )
-def run_time_roc_analysis(file_path: str, time_col: str, status_col: str, score_col: str, times: list):
-    times = [float(t) for t in times]
+def run_time_roc_analysis(
+    file_path: str,
+    time_col: str,
+    status_col: str,
+    score_col: str,
+    times: list,
+    job_dir: str = None,
+):
+    times = [float(t) for t in (times or [])]
+    if not times or len(times) > 20 or any(not math.isfinite(t) or t <= 0 for t in times):
+        raise ValueError("times 必须包含 1-20 个有限正数")
     times_r = "c(" + ", ".join([str(x) for x in times]) + ")"
+    file_path = r_escape_string_content(file_path)
+    time_col = r_escape_string_content(validate_r_column_name(time_col))
+    status_col = r_escape_string_content(validate_r_column_name(status_col))
+    score_col = r_escape_string_content(validate_r_column_name(score_col))
 
     r_code = f'''
 library(data.table)
@@ -597,4 +664,4 @@ write.csv(auc_df, "time_roc_auc.csv", row.names = FALSE)
 
 cat("生成文件: time_roc_curve.png, time_roc_auc.csv\\n")
 '''
-    return run_r_analysis(r_code, job_subdir="time_roc")
+    return run_r_analysis(r_code, job_subdir="time_roc", job_dir=job_dir)

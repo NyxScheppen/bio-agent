@@ -1,210 +1,214 @@
+import os
+import uuid
 from pathlib import Path
 
-from app.core.paths import STORAGE_DIR, GENERATED_DIR, UPLOAD_DIR
+from app.core.paths import GENERATED_DIR, STORAGE_DIR, UPLOAD_DIR
 from app.db import crud
+from app.utils.storage_contracts import (
+    artifact_relative_path_for_session,
+    resolve_storage_relative_path,
+    StorageValidationError,
+    validate_session_id,
+)
+
 
 def _safe_resolve_storage_path(relative_path: str) -> Path | None:
-    """
-    把数据库里的 relative_path 安全解析成真实磁盘路径。
-    """
-    if not relative_path:
-        return None
+    return resolve_storage_relative_path(relative_path, require_exists=False)
 
-    rel = str(relative_path).replace("\\", "/").strip()
-    rel = rel.lstrip("/")
-
-    # 防止 ../../ 这种路径穿越
-    if ".." in Path(rel).parts:
-        return None
-
-    storage_root = Path(STORAGE_DIR).resolve()
-    target = (storage_root / rel).resolve()
-
-    try:
-        target.relative_to(storage_root)
-    except ValueError:
-        return None
-
-    return target
 
 def _cleanup_empty_parent_dirs(path: Path):
-    """
-    删除文件后，顺手清理空目录。
-    """
-    if not path:
-        return
-
     stop_dirs = {
         Path(STORAGE_DIR).resolve(),
         Path(GENERATED_DIR).resolve(),
-        Path(UPLOAD_DIR).resolve()
+        Path(UPLOAD_DIR).resolve(),
     }
-
     current = path.parent.resolve()
-
     while current not in stop_dirs:
-        if not current.exists():
-            current = current.parent.resolve()
-            continue
-
         try:
             current.rmdir()
         except OSError:
-            # 目录非空，停止
             break
-        except Exception:
-            break
-
         current = current.parent.resolve()
 
-def _delete_one_file_by_record(file_record):
-    """
-    根据 StoredFile 记录删除真实磁盘文件。
 
-    返回格式：
-    {
-        "filename": "...",
-        "relative_path": "...",
-        "source_type": "...",
-        "deleted": true/false,
-        "reason": "..."
-    }
-    """
-    filename = getattr(file_record, "filename", "")
+def _stage_file_for_deletion(db, file_record, session_id: str):
     relative_path = getattr(file_record, "relative_path", "")
-    source_type = getattr(file_record, "source_type", "")
-
     result = {
-        "filename": filename,
+        "filename": getattr(file_record, "filename", ""),
         "relative_path": relative_path,
-        "source_type": source_type,
+        "source_type": getattr(file_record, "source_type", ""),
         "deleted": False,
-        "reason": ""
+        "reason": "",
     }
-
     target = _safe_resolve_storage_path(relative_path)
-
     if target is None:
-        result["reason"] = "非法路径，已跳过"
-        return result
-
+        result["reason"] = "非法路径，未删除记录"
+        return result, None, False
+    other_references = crud.count_other_file_references(
+        db,
+        session_id,
+        relative_path,
+    )
+    owned_path = artifact_relative_path_for_session(
+        relative_path,
+        session_id,
+        require_exists=False,
+    )
+    if owned_path is None and other_references == 0:
+        result["reason"] = "文件路径不属于当前会话，未删除记录"
+        return result, None, False
+    if other_references > 0:
+        result["reason"] = "文件仍被其他会话引用，仅删除当前会话记录"
+        return result, None, True
     if not target.exists():
-        result["reason"] = "文件不存在，可能已被手动删除"
-        return result
+        result["reason"] = "文件不存在，删除失效记录"
+        return result, None, True
+    if not target.is_file():
+        result["reason"] = "目标是目录，未删除记录"
+        return result, None, False
 
-    if target.is_dir():
-        result["reason"] = "目标是目录，不按文件记录删除"
-        return result
-
+    tombstone = target.with_name(f".delete-{uuid.uuid4().hex}.tmp")
     try:
-        target.unlink()
-        result["deleted"] = True
-        result["reason"] = "删除成功"
-        _cleanup_empty_parent_dirs(target)
-        return result
-    except Exception as e:
-        result["reason"] = f"删除失败：{str(e)}"
-        return result
+        os.replace(target, tombstone)
+    except Exception as exc:
+        result["reason"] = f"文件暂存失败：{exc}"
+        return result, None, False
+    result["reason"] = "等待数据库提交"
+    return result, (target, tombstone), True
+
+
+def _restore_staged_files(staged_files):
+    for target, tombstone, _ in reversed(staged_files):
+        if tombstone.exists():
+            try:
+                os.replace(tombstone, target)
+            except OSError:
+                pass
+
 
 def delete_session_with_files(
     db,
     session_id: str,
     delete_uploads: bool = True,
-    delete_generated: bool = True
+    delete_generated: bool = True,
 ):
-    """
-    删除一个会话，同时删除该会话关联的文件。
-    """
-    session_id = str(session_id or "").strip()
-
-    if not session_id:
-        return {
-            "status": "error",
-            "message": "session_id 不能为空"
-        }
+    """Delete selected artifacts; delete the session itself only for a full delete."""
+    try:
+        session_id = validate_session_id(session_id)
+    except StorageValidationError as exc:
+        return {"status": "error", "message": str(exc)}
 
     session = crud.get_session(db, session_id)
     if not session:
-        return {
-            "status": "error",
-            "message": f"会话不存在：{session_id}"
-        }
+        return {"status": "error", "message": f"会话不存在：{session_id}"}
 
     file_records = crud.get_files_by_session(db, session_id)
-
     records_to_delete = []
     skipped_records = []
-
-    for f in file_records:
-        source_type = getattr(f, "source_type", "")
-
-        if source_type == "generated" and delete_generated:
-            records_to_delete.append(f)
-        elif source_type == "upload" and delete_uploads:
-            records_to_delete.append(f)
+    for record in file_records:
+        source_type = getattr(record, "source_type", "")
+        selected = (
+            source_type == "generated" and delete_generated
+        ) or (
+            source_type == "upload" and delete_uploads
+        )
+        if selected:
+            records_to_delete.append(record)
         else:
             skipped_records.append({
-                "filename": getattr(f, "filename", ""),
-                "relative_path": getattr(f, "relative_path", ""),
+                "filename": getattr(record, "filename", ""),
+                "relative_path": getattr(record, "relative_path", ""),
                 "source_type": source_type,
-                "reason": "当前删除参数选择保留该类型文件"
+                "reason": "当前删除参数选择保留该类型文件",
             })
 
-    deleted_files = []
+    staged_files = []
+    staged_results = []
     failed_files = []
-
-    # 先删真实文件
-    for f in records_to_delete:
-        res = _delete_one_file_by_record(f)
-        if res.get("deleted"):
-            deleted_files.append(res)
+    records_ready = []
+    for record in records_to_delete:
+        result, staged, ready = _stage_file_for_deletion(db, record, session_id)
+        staged_results.append(result)
+        if staged:
+            staged_files.append((*staged, result))
+        if ready:
+            records_ready.append(record)
         else:
-            failed_files.append(res)
+            failed_files.append(result)
 
-    # 再删数据库记录
-    try:
-        file_record_count = crud.delete_file_records_by_session(db, session_id)
-        message_count = crud.delete_messages_by_session(db, session_id)
-        session_count = crud.delete_session_record(db, session_id)
-
-        db.commit()
-
-        return {
-            "status": "success",
-            "message": "会话及关联文件删除完成",
-            "session_id": session_id,
-            "deleted_files_count": len(deleted_files),
-            "failed_files_count": len(failed_files),
-            "skipped_files_count": len(skipped_records),
-            "deleted_db_records": {
-                "stored_files": file_record_count,
-                "chat_messages": message_count,
-                "chat_sessions": session_count
-            },
-            "deleted_files": deleted_files,
-            "failed_files": failed_files,
-            "skipped_files": skipped_records
-        }
-
-    except Exception as e:
+    if failed_files:
+        _restore_staged_files(staged_files)
         db.rollback()
-
         return {
             "status": "error",
-            "message": f"数据库删除失败：{str(e)}",
+            "message": "部分文件无法安全删除，数据库未修改",
             "session_id": session_id,
-            "deleted_files_before_db_error": deleted_files,
             "failed_files": failed_files,
-            "skipped_files": skipped_records
+            "skipped_files": skipped_records,
         }
 
+    full_delete = delete_uploads and delete_generated
+    try:
+        for record in records_ready:
+            db.delete(record)
+
+        message_count = 0
+        session_count = 0
+        execution_count = 0
+        if full_delete:
+            message_count = crud.delete_messages_by_session(db, session_id)
+            execution_count = crud.delete_tool_executions_by_session(db, session_id)
+            session_count = crud.delete_session_record(db, session_id)
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        _restore_staged_files(staged_files)
+        return {
+            "status": "error",
+            "message": f"数据库删除失败：{exc}",
+            "session_id": session_id,
+            "failed_files": failed_files,
+            "skipped_files": skipped_records,
+        }
+
+    deleted_files = []
+    cleanup_failures = []
+    for target, tombstone, result in staged_files:
+        try:
+            tombstone.unlink(missing_ok=True)
+            result["deleted"] = True
+            result["reason"] = "删除成功"
+            _cleanup_empty_parent_dirs(target)
+            deleted_files.append(result)
+        except OSError as exc:
+            result["reason"] = f"数据库已提交，但墓碑文件清理失败：{exc}"
+            cleanup_failures.append(result)
+
+    stale_or_shared = [result for result in staged_results if not result["deleted"]]
+    return {
+        "status": "success",
+        "message": "会话删除完成" if full_delete else "选定类型文件删除完成",
+        "session_id": session_id,
+        "deleted_files_count": len(deleted_files),
+        "failed_files_count": len(cleanup_failures),
+        "skipped_files_count": len(skipped_records),
+        "deleted_db_records": {
+            "stored_files": len(records_ready),
+            "chat_messages": message_count,
+            "tool_executions": execution_count,
+            "chat_sessions": session_count,
+        },
+        "deleted_files": deleted_files,
+        "stale_or_shared_files": stale_or_shared,
+        "failed_files": cleanup_failures,
+        "skipped_files": skipped_records,
+    }
+
+
 def delete_session_generated_files_only(db, session_id: str):
-    """
-    只删除会话关联的 generated 文件，不删除上传文件。
-    """
     return delete_session_with_files(
         db=db,
         session_id=session_id,
         delete_uploads=False,
-        delete_generated=True
+        delete_generated=True,
     )

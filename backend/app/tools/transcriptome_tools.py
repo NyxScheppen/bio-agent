@@ -1,5 +1,5 @@
 from app.agent.tool_registry import register_tool
-from app.tools.r_tools import run_r_analysis
+from app.tools.r_tools import run_r_analysis, r_escape_string_content
 
 @register_tool(
     name="run_bulk_rnaseq_deg_analysis",
@@ -28,7 +28,17 @@ from app.tools.r_tools import run_r_analysis
     },
     racing_group="deg_analysis",
 )
-def run_bulk_rnaseq_deg_analysis(expression_file: str, group_file: str, control_group: str, treatment_group: str):
+def run_bulk_rnaseq_deg_analysis(
+    expression_file: str,
+    group_file: str,
+    control_group: str,
+    treatment_group: str,
+    job_dir: str = None,
+):
+    expression_file = r_escape_string_content(expression_file)
+    group_file = r_escape_string_content(group_file)
+    control_group = r_escape_string_content(control_group)
+    treatment_group = r_escape_string_content(treatment_group)
     r_code = f'''
 library(data.table)
 library(limma)
@@ -37,6 +47,8 @@ library(pheatmap)
 
 expr <- fread(smart_read("{expression_file}"), data.table = FALSE)
 grp <- fread(smart_read("{group_file}"), data.table = FALSE)
+control_group <- "{control_group}"
+treatment_group <- "{treatment_group}"
 
 if (!("gene" %in% colnames(expr))) stop("表达矩阵必须包含 gene 列")
 if (!all(c("sample", "group") %in% colnames(grp))) stop("分组文件必须包含 sample 和 group 列")
@@ -52,17 +64,18 @@ if (length(common_samples) < 2) stop("表达矩阵和分组文件没有足够重
 expr_mat <- expr_mat[, common_samples, drop = FALSE]
 grp <- grp[match(common_samples, grp$sample), , drop = FALSE]
 
-grp <- grp[grp$group %in% c("{control_group}", "{treatment_group}"), ]
+grp <- grp[grp$group %in% c(control_group, treatment_group), ]
 expr_mat <- expr_mat[, grp$sample, drop = FALSE]
 
 if (ncol(expr_mat) < 4) stop("样本数太少，建议至少4个样本")
 
-group_factor <- factor(grp$group, levels = c("{control_group}", "{treatment_group}"))
+group_factor <- factor(grp$group, levels = c(control_group, treatment_group))
 design <- model.matrix(~ 0 + group_factor)
-colnames(design) <- levels(group_factor)
+colnames(design) <- make.names(levels(group_factor))
 
 fit <- lmFit(expr_mat, design)
-contrast.matrix <- makeContrasts(contrasts = paste0("{treatment_group}", "-", "{control_group}"), levels = design)
+contrast_name <- paste0(make.names(treatment_group), "-", make.names(control_group))
+contrast.matrix <- makeContrasts(contrasts = contrast_name, levels = design)
 fit2 <- contrasts.fit(fit, contrast.matrix)
 fit2 <- eBayes(fit2)
 
@@ -105,7 +118,7 @@ ggsave("bulk_pca.png", p2, width = 8, height = 6, dpi = 150)
 
 cat("生成文件: bulk_deg_results.csv, bulk_volcano.png, bulk_heatmap.png, bulk_pca.png\\n")
 '''
-    return run_r_analysis(r_code)
+    return run_r_analysis(r_code, job_subdir="bulk_rnaseq_deg", job_dir=job_dir)
 
 
 @register_tool(
@@ -123,7 +136,17 @@ cat("生成文件: bulk_deg_results.csv, bulk_volcano.png, bulk_heatmap.png, bul
     },
     racing_group="deg_analysis",
 )
-def run_deseq2_count_deg_analysis(count_file: str, group_file: str, control_group: str, treatment_group: str):
+def run_deseq2_count_deg_analysis(
+    count_file: str,
+    group_file: str,
+    control_group: str,
+    treatment_group: str,
+    job_dir: str = None,
+):
+    count_file = r_escape_string_content(count_file)
+    group_file = r_escape_string_content(group_file)
+    control_group = r_escape_string_content(control_group)
+    treatment_group = r_escape_string_content(treatment_group)
     r_code = f'''
 library(data.table)
 library(DESeq2)
@@ -200,7 +223,7 @@ if (length(top_genes) > 1) {{
 
 cat("生成文件: deseq2_deg_results.csv, deseq2_normalized_counts.csv, deseq2_volcano.png, deseq2_heatmap.png\\n")
 '''
-    return run_r_analysis(r_code, job_subdir="deseq2_deg")
+    return run_r_analysis(r_code, job_subdir="deseq2_deg", job_dir=job_dir)
 
 @register_tool(
     name="run_bulk_pca_analysis",
@@ -214,7 +237,13 @@ cat("生成文件: deseq2_deg_results.csv, deseq2_normalized_counts.csv, deseq2_
         "required": ["expression_file"]
     }
 )
-def run_bulk_pca_analysis(expression_file: str, group_file: str = ""):
+def run_bulk_pca_analysis(
+    expression_file: str,
+    group_file: str = "",
+    job_dir: str = None,
+):
+    expression_file = r_escape_string_content(expression_file)
+    group_file = r_escape_string_content(group_file)
     group_read_code = f'grp <- fread(smart_read("{group_file}"), data.table = FALSE)' if group_file else 'grp <- NULL'
 
     r_code = f'''
@@ -263,4 +292,4 @@ ggsave("bulk_pca_only.png", p, width = 8, height = 6, dpi = 150)
 
 cat("生成文件: bulk_pca_coordinates.csv, bulk_pca_variance.csv, bulk_pca_only.png\\n")
 '''
-    return run_r_analysis(r_code, job_subdir="bulk_pca")
+    return run_r_analysis(r_code, job_subdir="bulk_pca", job_dir=job_dir)

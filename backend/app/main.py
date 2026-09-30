@@ -10,9 +10,15 @@ from app.api.chat import router as chat_router
 from app.api.upload import router as upload_router
 from app.api.history import router as history_router
 from app.api.system import router as system_router
+from app.core.config import MAX_UPLOAD_REQUEST_BYTES
+from app.upload_limit import UploadBodyLimitMiddleware
 
 from app.core.paths import STORAGE_DIR, GENERATED_DIR
 from app.db.database import Base, engine
+from app.utils.storage_contracts import (
+    is_dangerous_inline_file,
+    resolve_storage_relative_path,
+)
 
 # =========================
 # 基础路径
@@ -47,6 +53,11 @@ Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="Bio Agent Backend")
 
+app.add_middleware(
+    UploadBodyLimitMiddleware,
+    max_body_bytes=MAX_UPLOAD_REQUEST_BYTES,
+)
+
 # 允许前端跨域访问
 
 app.add_middleware(
@@ -59,7 +70,30 @@ app.add_middleware(
 if not STORAGE_DIR.exists():
     STORAGE_DIR.mkdir(parents=True, exist_ok=True)
 
-app.mount("/files", StaticFiles(directory=str(STORAGE_DIR)), name="files")
+@app.api_route("/files/{file_path:path}", methods=["GET", "HEAD"], name="files")
+async def serve_stored_file(file_path: str):
+    target = resolve_storage_relative_path(
+        file_path,
+        allowed_roots=("uploads", "generated"),
+        require_exists=True,
+    )
+    if target is None:
+        raise HTTPException(status_code=404, detail="File not found")
+
+    headers = {
+        "X-Content-Type-Options": "nosniff",
+        "Cache-Control": "private, no-store",
+    }
+    if is_dangerous_inline_file(target):
+        headers["Content-Security-Policy"] = "sandbox; default-src 'none'"
+        return FileResponse(
+            str(target),
+            media_type="application/octet-stream",
+            filename=target.name,
+            content_disposition_type="attachment",
+            headers=headers,
+        )
+    return FileResponse(str(target), headers=headers)
 
 
 app.include_router(chat_router)

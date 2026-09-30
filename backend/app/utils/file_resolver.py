@@ -2,6 +2,8 @@ from pathlib import Path
 from typing import Optional
 import os
 
+from app.utils.storage_contracts import StorageValidationError, validate_session_id
+
 BACKEND_DIR = Path(__file__).resolve().parents[2]
 STORAGE_DIR = BACKEND_DIR / "storage"
 UPLOAD_DIR = STORAGE_DIR / "uploads"
@@ -35,10 +37,20 @@ def _within_directory(path: Path, root: Path) -> bool:
 
 def _session_upload_dir(session_id: str) -> Optional[Path]:
     """Return the exact session upload directory for a simple, safe session key."""
-    key = str(session_id or "").strip()
-    if not key or key in {".", ".."} or Path(key).name != key or "/" in key or "\\" in key:
+    try:
+        key = validate_session_id(session_id)
+    except StorageValidationError:
         return None
     candidate = UPLOAD_DIR / key
+    return candidate if _within_storage(candidate) else None
+
+
+def _session_generated_dir(session_id: str) -> Optional[Path]:
+    try:
+        key = validate_session_id(session_id)
+    except StorageValidationError:
+        return None
+    candidate = GENERATED_DIR / key
     return candidate if _within_storage(candidate) else None
 
 
@@ -95,7 +107,7 @@ def resolve_file_path(file_path: str, session_id: Optional[str] = None) -> Optio
                     return session_candidate
 
                 # 带 session 的调用必须使用明确的 generated/... 路径访问生成物。
-                return target if _within_storage(target) else None
+                return None
 
             # 5) 无 session 的兼容路径只对纯文件名执行惰性全局搜索
             if Path(raw).name == raw:
@@ -110,6 +122,10 @@ def resolve_file_path(file_path: str, session_id: Optional[str] = None) -> Optio
         return None
     if session_id and _within_directory(target, UPLOAD_DIR):
         session_dir = _session_upload_dir(session_id)
+        if session_dir is None or not _within_directory(target, session_dir):
+            return None
+    if session_id and _within_directory(target, GENERATED_DIR):
+        session_dir = _session_generated_dir(session_id)
         if session_dir is None or not _within_directory(target, session_dir):
             return None
     return target

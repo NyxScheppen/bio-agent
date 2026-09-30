@@ -1,5 +1,5 @@
 from app.agent.tool_registry import register_tool
-from app.tools.r_tools import run_r_analysis
+from app.tools.r_tools import run_r_analysis, r_escape_string_content
 
 @register_tool(
     name="run_virtual_knockdown_bulk_analysis",
@@ -18,8 +18,15 @@ from app.tools.r_tools import run_r_analysis
         "required": ["expression_file", "gene"]
     }
 )
-def run_virtual_knockdown_bulk_analysis(expression_file: str, gene: str, knockdown_ratio: float = 0.8):
+def run_virtual_knockdown_bulk_analysis(
+    expression_file: str,
+    gene: str,
+    knockdown_ratio: float = 0.8,
+    job_dir: str = None,
+):
     ratio = max(0.0, min(float(knockdown_ratio), 1.0))
+    expression_file = r_escape_string_content(expression_file)
+    gene = r_escape_string_content(gene)
 
     r_code = f'''
 library(data.table)
@@ -62,4 +69,4 @@ write.csv(summary_df, "virtual_knockdown_summary.csv", row.names = FALSE)
 
 cat("生成文件: virtual_knockdown_before_after.csv, virtual_knockdown_expression_matrix.csv, virtual_knockdown_summary.csv\\n")
 '''
-    return run_r_analysis(r_code, job_subdir="virtual_knockdown")
+    return run_r_analysis(r_code, job_subdir="virtual_knockdown", job_dir=job_dir)

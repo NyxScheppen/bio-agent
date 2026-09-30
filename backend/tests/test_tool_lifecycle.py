@@ -123,12 +123,13 @@ def test_run_tool_with_lifecycle_success():
     from app.agent.tool_runner import run_tool_with_lifecycle
     from app.agent.tool_result import ToolResult
 
-    def my_tool(file_path: str, threshold: float = 0.05):
+    def my_tool(file_path: str, threshold: float = 0.05, job_dir: str = ""):
+        Path(job_dir, "result.csv").write_text("gene,pvalue\nTP53,0.01")
         return {
             "status": "success",
             "message": "分析完成",
             "output_files": [
-                {"name": "result.csv", "relative_path": "generated/x/result.csv"}
+                {"name": "result.csv", "relative_path": "result.csv"}
             ],
             "up_genes": 150,
             "down_genes": 80,
@@ -440,7 +441,7 @@ def test_lifecycle_merge_no_duplicates():
         return {
             "status": "success",
             "output_files": [
-                {"name": "result.csv", "relative_path": "generated/xyz/result.csv"}
+                {"name": "result.csv", "relative_path": "result.csv"}
             ],
         }
 

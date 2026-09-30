@@ -1,5 +1,10 @@
 from app.agent.tool_registry import register_tool
-from app.tools.r_tools import run_r_analysis
+from app.tools.r_tools import (
+    run_r_analysis,
+    r_character_vector,
+    r_escape_string_content,
+    validate_r_column_name,
+)
 from app.tools.r_preprocess_templates import build_feature_df_preprocess_r
 
 @register_tool(
@@ -35,15 +40,20 @@ def run_ml_classification_model(
     label_col: str,
     algorithm: str = "rf",
     test_ratio: float = 0.3,
-    feature_preprocess: str = "auto"
+    feature_preprocess: str = "auto",
+    job_dir: str = None,
 ):
     method_map = {
         "logistic": "glm",
         "rf": "rf",
         "svm": "svmRadial"
     }
-    caret_method = method_map.get(algorithm.lower(), "rf")
-    family_line = 'family = "binomial",' if algorithm.lower() == "logistic" else ""
+    algorithm = algorithm.lower() if algorithm.lower() in method_map else "rf"
+    caret_method = method_map[algorithm]
+    family_line = 'family = "binomial",' if algorithm == "logistic" else ""
+    file_path = r_escape_string_content(file_path)
+    label_col = r_escape_string_content(validate_r_column_name(label_col))
+    test_ratio = max(0.05, min(float(test_ratio), 0.5))
     preprocess_r = build_feature_df_preprocess_r(f'setdiff(colnames(df), "{label_col}")', feature_preprocess)
 
     r_code = f'''
@@ -68,7 +78,7 @@ write.csv(prep$info, "preprocess_log2_info.csv", row.names = FALSE)
 df[["{label_col}"]] <- as.factor(df[["{label_col}"]])
 if (length(unique(df[["{label_col}"]])) != 2) stop("当前工具仅支持二分类任务")
 
-inTrain <- createDataPartition(df[["{label_col}"]], p = {1-float(test_ratio)}, list = FALSE)
+inTrain <- createDataPartition(df[["{label_col}"]], p = {1-test_ratio}, list = FALSE)
 train_df <- df[inTrain, , drop = FALSE]
 test_df  <- df[-inTrain, , drop = FALSE]
 
@@ -140,7 +150,7 @@ if ("rf" == "{algorithm}") {{
 
 cat("生成文件: preprocess_log2_info.csv, ml_confusion_matrix.txt, ml_roc_curve.png, ml_metrics.csv, ml_predictions.csv\\n")
 '''
-    return run_r_analysis(r_code)
+    return run_r_analysis(r_code, job_subdir="ml_classification", job_dir=job_dir)
 
 
 @register_tool(
@@ -163,8 +173,11 @@ cat("生成文件: preprocess_log2_info.csv, ml_confusion_matrix.txt, ml_roc_cur
 def run_ml_feature_selection_lasso(
     file_path: str,
     label_col: str,
-    feature_preprocess: str = "auto"
+    feature_preprocess: str = "auto",
+    job_dir: str = None,
 ):
+    file_path = r_escape_string_content(file_path)
+    label_col = r_escape_string_content(validate_r_column_name(label_col))
     preprocess_r = build_feature_df_preprocess_r(f'setdiff(colnames(df), "{label_col}")', feature_preprocess)
 
     r_code = f'''
@@ -211,7 +224,11 @@ write.csv(coef_df, "lasso_feature_selection.csv", row.names = FALSE)
 
 cat("生成文件: preprocess_log2_info.csv, lasso_feature_cv_curve.png, lasso_feature_coef_path.png, lasso_feature_selection.csv\\n")
 '''
-    return run_r_analysis(r_code, job_subdir="ml_lasso_feature_selection")
+    return run_r_analysis(
+        r_code,
+        job_subdir="ml_lasso_feature_selection",
+        job_dir=job_dir,
+    )
 
 
 @register_tool(
@@ -246,7 +263,8 @@ def run_multi_model_comparison(
     label_col: str,
     algorithms: list = None,
     test_ratio: float = 0.3,
-    feature_preprocess: str = "auto"
+    feature_preprocess: str = "auto",
+    job_dir: str = None,
 ):
     algorithms = algorithms or ["logistic", "rf", "svm"]
     method_map = {
@@ -254,7 +272,11 @@ def run_multi_model_comparison(
         "rf": "rf",
         "svm": "svmRadial"
     }
-    algos_r = "c(" + ", ".join([f'"{a}"' for a in algorithms if a in method_map]) + ")"
+    algorithms = [str(item).lower() for item in algorithms if str(item).lower() in method_map]
+    algos_r = r_character_vector(algorithms)
+    file_path = r_escape_string_content(file_path)
+    label_col = r_escape_string_content(validate_r_column_name(label_col))
+    test_ratio = max(0.05, min(float(test_ratio), 0.5))
     preprocess_r = build_feature_df_preprocess_r(f'setdiff(colnames(df), "{label_col}")', feature_preprocess)
 
     r_code = f'''
@@ -278,7 +300,7 @@ write.csv(prep$info, "preprocess_log2_info.csv", row.names = FALSE)
 df[["{label_col}"]] <- as.factor(df[["{label_col}"]])
 if (length(unique(df[["{label_col}"]])) != 2) stop("当前仅支持二分类")
 
-inTrain <- createDataPartition(df[["{label_col}"]], p = {1-float(test_ratio)}, list = FALSE)
+inTrain <- createDataPartition(df[["{label_col}"]], p = {1-test_ratio}, list = FALSE)
 train_df <- df[inTrain, , drop = FALSE]
 test_df  <- df[-inTrain, , drop = FALSE]
 
@@ -326,4 +348,4 @@ write.csv(res_df, "multi_model_comparison.csv", row.names = FALSE)
 
 cat("生成文件: preprocess_log2_info.csv, multi_model_comparison.csv\\n")
 '''
-    return run_r_analysis(r_code, job_subdir="multi_model_comparison")
+    return run_r_analysis(r_code, job_subdir="multi_model_comparison", job_dir=job_dir)

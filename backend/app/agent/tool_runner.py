@@ -18,6 +18,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
+from urllib.parse import unquote
 
 from app.agent.tool_context import ToolExecutionContext, create_tool_context
 from app.agent.tool_result import (
@@ -36,7 +37,7 @@ from app.agent.agent_constants import (
     MAX_TOOL_TIMEOUT_SECONDS,
     DEFAULT_MAX_MEMORY_MB,
 )
-from app.utils.file_utils import build_file_url
+from app.utils.file_utils import build_file_url, detect_file_type
 
 # psutil 是可选依赖，缺失时资源监控自动降级
 try:
@@ -270,6 +271,46 @@ def merge_output_files(
     return result
 
 
+def restrict_output_files_to_job(
+    output_files: List[OutputFile],
+    job_dir: str,
+) -> List[OutputFile]:
+    """Keep only existing files contained by the lifecycle-owned job directory."""
+    from app.core.runtime_paths import STORAGE_DIR
+
+    job_root = Path(job_dir).resolve()
+    storage_root = Path(STORAGE_DIR).resolve()
+    result: List[OutputFile] = []
+    seen: set[str] = set()
+
+    for output in output_files:
+        raw = unquote(str(output.relative_path or "")).replace("\\", "/")
+        if raw.startswith("generated/") or raw.startswith("uploads/"):
+            candidate = storage_root / raw
+        elif raw:
+            candidate = Path(raw) if Path(raw).is_absolute() else job_root / raw
+        else:
+            candidate = job_root / output.name
+
+        try:
+            resolved = candidate.resolve()
+            resolved.relative_to(job_root)
+            canonical = resolved.relative_to(storage_root).as_posix()
+        except (OSError, ValueError):
+            continue
+        if not resolved.is_file() or canonical in seen:
+            continue
+
+        seen.add(canonical)
+        output.name = resolved.name
+        output.relative_path = canonical
+        output.url = build_file_url(canonical)
+        output.size_bytes = resolved.stat().st_size
+        output.file_type = detect_file_type(resolved.name)
+        result.append(output)
+    return result
+
+
 def _inject_lifecycle_args(
     func: Callable,
     function_args: Dict[str, Any],
@@ -447,11 +488,15 @@ def run_tool_with_lifecycle(
     collected_files = collect_generated_files(ctx.job_dir)
 
     # 7. 合并 output_files
+    validated_explicit = restrict_output_files_to_job(
+        list(normalized.output_files),
+        ctx.job_dir,
+    )
     merged_files = merge_output_files(
-        explicit_files=list(normalized.output_files),
+        explicit_files=validated_explicit,
         collected_files=collected_files,
     )
-    normalized.output_files = merged_files
+    normalized.output_files = restrict_output_files_to_job(merged_files, ctx.job_dir)
 
     # 8. 填充 provenance
     normalized.provenance.tool_name = tool_name

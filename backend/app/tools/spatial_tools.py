@@ -1,5 +1,5 @@
 from app.agent.tool_registry import register_tool
-from app.tools.r_tools import run_r_analysis
+from app.tools.r_tools import run_r_analysis, r_escape_string_content
 
 @register_tool(
     name="run_spatial_basic_analysis",
@@ -13,7 +13,12 @@ from app.tools.r_tools import run_r_analysis
         "required": ["data_dir"]
     }
 )
-def run_spatial_basic_analysis(data_dir: str, project_name: str = "spatial_project"):
+def run_spatial_basic_analysis(
+    data_dir: str,
+    project_name: str = "spatial_project",
+    job_dir: str = None,
+):
+    data_dir = r_escape_string_content(data_dir)
     r_code = f'''
 library(Seurat)
 library(ggplot2)
@@ -37,7 +42,7 @@ write.csv(obj@meta.data, "spatial_metadata.csv", row.names = TRUE)
 
 cat("生成文件: spatial_cluster_plot.png, spatial_seurat.rds, spatial_metadata.csv\\n")
 '''
-    return run_r_analysis(r_code, job_subdir="spatial_basic")
+    return run_r_analysis(r_code, job_subdir="spatial_basic", job_dir=job_dir)
 
 @register_tool(
     name="run_spatial_feature_plot",
@@ -51,17 +56,19 @@ cat("生成文件: spatial_cluster_plot.png, spatial_seurat.rds, spatial_metadat
         "required": ["seurat_rds", "gene"]
     }
 )
-def run_spatial_feature_plot(seurat_rds: str, gene: str):
+def run_spatial_feature_plot(seurat_rds: str, gene: str, job_dir: str = None):
+    seurat_rds = r_escape_string_content(seurat_rds)
+    gene = r_escape_string_content(gene)
     r_code = f'''
 library(Seurat)
 
 obj <- readRDS(smart_read("{seurat_rds}"))
 if (!("{gene}" %in% rownames(obj))) stop("找不到目标基因")
 
-png("spatial_feature_{gene}.png", width = 1200, height = 900, res = 150)
+png("spatial_feature_plot.png", width = 1200, height = 900, res = 150)
 print(SpatialFeaturePlot(obj, features = "{gene}"))
 dev.off()
 
-cat("生成文件: spatial_feature_{gene}.png\\n")
+cat("生成文件: spatial_feature_plot.png\\n")
 '''
-    return run_r_analysis(r_code, job_subdir="spatial_feature")
+    return run_r_analysis(r_code, job_subdir="spatial_feature", job_dir=job_dir)

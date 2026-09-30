@@ -1,5 +1,5 @@
 from app.agent.tool_registry import register_tool
-from app.tools.r_tools import run_r_analysis
+from app.tools.r_tools import run_r_analysis, r_escape_string_content
 
 @register_tool(
     name="run_scrna_basic_qc_analysis",
@@ -13,7 +13,13 @@ from app.tools.r_tools import run_r_analysis
         "required": ["data_dir"]
     }
 )
-def run_scrna_basic_qc_analysis(data_dir: str, project_name: str = "scRNA_project"):
+def run_scrna_basic_qc_analysis(
+    data_dir: str,
+    project_name: str = "scRNA_project",
+    job_dir: str = None,
+):
+    data_dir = r_escape_string_content(data_dir)
+    project_name = r_escape_string_content(project_name)
     r_code = f'''
 library(Seurat)
 library(ggplot2)
@@ -35,7 +41,7 @@ saveRDS(obj, "scrna_raw_seurat.rds")
 
 cat("生成文件: scrna_qc_violin.png, scrna_qc_metrics.csv, scrna_raw_seurat.rds\\n")
 '''
-    return run_r_analysis(r_code, job_subdir="scrna_qc")
+    return run_r_analysis(r_code, job_subdir="scrna_qc", job_dir=job_dir)
 
 @register_tool(
     name="run_scrna_clustering_analysis",
@@ -49,7 +55,13 @@ cat("生成文件: scrna_qc_violin.png, scrna_qc_metrics.csv, scrna_raw_seurat.r
         "required": ["seurat_rds"]
     }
 )
-def run_scrna_clustering_analysis(seurat_rds: str, resolution: float = 0.5):
+def run_scrna_clustering_analysis(
+    seurat_rds: str,
+    resolution: float = 0.5,
+    job_dir: str = None,
+):
+    seurat_rds = r_escape_string_content(seurat_rds)
+    resolution = max(0.0, min(float(resolution), 10.0))
     r_code = f'''
 library(Seurat)
 library(ggplot2)
@@ -61,7 +73,7 @@ obj <- FindVariableFeatures(obj)
 obj <- ScaleData(obj)
 obj <- RunPCA(obj)
 obj <- FindNeighbors(obj, dims = 1:20)
-obj <- FindClusters(obj, resolution = {float(resolution)})
+obj <- FindClusters(obj, resolution = {resolution})
 obj <- RunUMAP(obj, dims = 1:20)
 
 png("scrna_umap_clusters.png", width = 1200, height = 900, res = 150)
@@ -73,7 +85,7 @@ write.csv(obj@meta.data, "scrna_cluster_metadata.csv", row.names = TRUE)
 
 cat("生成文件: scrna_umap_clusters.png, scrna_clustered_seurat.rds, scrna_cluster_metadata.csv\\n")
 '''
-    return run_r_analysis(r_code, job_subdir="scrna_cluster")
+    return run_r_analysis(r_code, job_subdir="scrna_cluster", job_dir=job_dir)
 
 @register_tool(
     name="run_scrna_marker_analysis",
@@ -87,7 +99,13 @@ cat("生成文件: scrna_umap_clusters.png, scrna_clustered_seurat.rds, scrna_cl
         "required": ["seurat_rds"]
     }
 )
-def run_scrna_marker_analysis(seurat_rds: str, top_n: int = 10):
+def run_scrna_marker_analysis(
+    seurat_rds: str,
+    top_n: int = 10,
+    job_dir: str = None,
+):
+    seurat_rds = r_escape_string_content(seurat_rds)
+    top_n = max(1, min(int(top_n), 100))
     r_code = f'''
 library(Seurat)
 library(dplyr)
@@ -98,11 +116,11 @@ write.csv(markers, "scrna_all_markers.csv", row.names = FALSE)
 
 top_markers <- markers %>%
   group_by(cluster) %>%
-  slice_max(order_by = avg_log2FC, n = {int(top_n)}) %>%
+  slice_max(order_by = avg_log2FC, n = {top_n}) %>%
   ungroup()
 
 write.csv(top_markers, "scrna_top_markers.csv", row.names = FALSE)
 
 cat("生成文件: scrna_all_markers.csv, scrna_top_markers.csv\\n")
 '''
-    return run_r_analysis(r_code, job_subdir="scrna_marker")
+    return run_r_analysis(r_code, job_subdir="scrna_marker", job_dir=job_dir)

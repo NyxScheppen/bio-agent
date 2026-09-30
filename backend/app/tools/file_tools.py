@@ -2,9 +2,15 @@ import os
 import csv
 import gzip
 import json
+import zipfile
 import pandas as pd
 
 from app.agent.tool_registry import register_tool
+from app.core.config import (
+    MAX_PREVIEW_DECOMPRESSED_BYTES,
+    MAX_PREVIEW_LINE_BYTES,
+    MAX_PREVIEW_SCAN_BYTES,
+)
 from app.utils.file_resolver import resolve_file_path, debug_file_context
 
 
@@ -55,12 +61,26 @@ def _count_text_table_rows(real_path, compressed=False):
     统计文本表格数据行数。
     返回值不包含 header 行。
     """
-    opener = gzip.open if compressed else open
-
     try:
-        with opener(real_path, "rt", encoding="utf-8", errors="replace", newline="") as f:
-            total_lines = sum(1 for _ in f)
-
+        if not compressed and os.path.getsize(real_path) > MAX_PREVIEW_SCAN_BYTES:
+            return None
+        opener = gzip.open if compressed else open
+        limit = MAX_PREVIEW_DECOMPRESSED_BYTES if compressed else MAX_PREVIEW_SCAN_BYTES
+        total_bytes = 0
+        total_lines = 0
+        last_byte = b""
+        with opener(real_path, "rb") as stream:
+            while True:
+                chunk = stream.read(min(1024 * 1024, limit - total_bytes + 1))
+                if not chunk:
+                    break
+                total_bytes += len(chunk)
+                if total_bytes > limit:
+                    return None
+                total_lines += chunk.count(b"\n")
+                last_byte = chunk[-1:]
+        if total_bytes and last_byte != b"\n":
+            total_lines += 1
         return max(total_lines - 1, 0)
     except Exception:
         return None
@@ -73,13 +93,63 @@ def _count_csv_rows(real_path):
     返回值不包含 header 行。
     """
     try:
+        if os.path.getsize(real_path) > MAX_PREVIEW_SCAN_BYTES:
+            return None
+        previous_limit = csv.field_size_limit()
+        csv.field_size_limit(MAX_PREVIEW_LINE_BYTES)
         with open(real_path, "r", encoding="utf-8", errors="replace", newline="") as f:
             reader = csv.reader(f)
             total_rows = sum(1 for _ in reader)
-
         return max(total_rows - 1, 0)
+    except (csv.Error, MemoryError):
+        return None
     except Exception:
         return _count_text_table_rows(real_path, compressed=False)
+    finally:
+        if "previous_limit" in locals():
+            csv.field_size_limit(previous_limit)
+
+
+def _check_preview_line_budget(real_path, compressed: bool, lines: int) -> None:
+    opener = gzip.open if compressed else open
+    with opener(real_path, "rb") as stream:
+        for _ in range(max(1, lines + 1)):
+            line = stream.readline(MAX_PREVIEW_LINE_BYTES + 1)
+            if len(line) > MAX_PREVIEW_LINE_BYTES:
+                raise ValueError(
+                    f"表格单行超过预览上限 {MAX_PREVIEW_LINE_BYTES} 字节"
+                )
+            if not line:
+                break
+
+
+def _validate_excel_archive(real_path) -> None:
+    if not str(real_path).lower().endswith(".xlsx"):
+        if os.path.getsize(real_path) > MAX_PREVIEW_SCAN_BYTES:
+            raise ValueError("Excel 文件超过预览扫描上限")
+        return
+    with zipfile.ZipFile(real_path) as archive:
+        expanded = sum(info.file_size for info in archive.infolist())
+        if expanded > MAX_PREVIEW_DECOMPRESSED_BYTES:
+            raise ValueError(
+                f"XLSX 解压后超过预览上限 {MAX_PREVIEW_DECOMPRESSED_BYTES} 字节"
+            )
+
+
+def _read_bounded_text_lines(real_path, compressed: bool, count: int) -> list[str]:
+    opener = gzip.open if compressed else open
+    lines: list[str] = []
+    with opener(real_path, "rb") as stream:
+        for _ in range(count):
+            raw = stream.readline(MAX_PREVIEW_LINE_BYTES + 1)
+            if not raw:
+                break
+            if len(raw) > MAX_PREVIEW_LINE_BYTES:
+                raise ValueError(
+                    f"单行超过预览上限 {MAX_PREVIEW_LINE_BYTES} 字节"
+                )
+            lines.append(raw.rstrip(b"\r\n").decode("utf-8", errors="replace"))
+    return lines
 
 
 def _read_table_preview(real_path, nrows=5):
@@ -90,26 +160,31 @@ def _read_table_preview(real_path, nrows=5):
     name_lower = real_path.name.lower()
 
     if name_lower.endswith(".csv"):
+        _check_preview_line_budget(real_path, compressed=False, lines=nrows)
         df = pd.read_csv(real_path, nrows=nrows)
         total_rows = _count_csv_rows(real_path)
         return df, total_rows, "csv"
 
     if name_lower.endswith(".tsv") or name_lower.endswith(".txt"):
+        _check_preview_line_budget(real_path, compressed=False, lines=nrows)
         df = pd.read_csv(real_path, sep="\t", nrows=nrows)
         total_rows = _count_text_table_rows(real_path, compressed=False)
         return df, total_rows, "tsv/txt"
 
     if name_lower.endswith(".csv.gz"):
+        _check_preview_line_budget(real_path, compressed=True, lines=nrows)
         df = pd.read_csv(real_path, compression="gzip", nrows=nrows)
         total_rows = _count_text_table_rows(real_path, compressed=True)
         return df, total_rows, "csv.gz"
 
     if name_lower.endswith(".tsv.gz") or name_lower.endswith(".txt.gz"):
+        _check_preview_line_budget(real_path, compressed=True, lines=nrows)
         df = pd.read_csv(real_path, sep="\t", compression="gzip", nrows=nrows)
         total_rows = _count_text_table_rows(real_path, compressed=True)
         return df, total_rows, "tsv/txt.gz"
 
     if suffix in [".xlsx", ".xls"]:
+        _validate_excel_archive(real_path)
         df = pd.read_excel(real_path, nrows=nrows)
 
         # Excel 精确统计总行数比较贵，这里用 pandas 只读列信息会较麻烦。
@@ -233,12 +308,7 @@ def load_large_bio_data(file_path: str, session_id: str = None):
 
     try:
         if str(real_path).endswith(".gz"):
-            with gzip.open(real_path, "rt", encoding="utf-8", errors="replace") as f:
-                lines = []
-                for i, line in enumerate(f):
-                    lines.append(line.rstrip("\n"))
-                    if i >= 19:
-                        break
+            lines = _read_bounded_text_lines(real_path, compressed=True, count=20)
 
             return {
                 "status": "success",
@@ -250,12 +320,7 @@ def load_large_bio_data(file_path: str, session_id: str = None):
                 "note": "仅返回前 20 行预览，避免大型 GEO 文件导致请求体过大。"
             }
 
-        with open(real_path, "r", encoding="utf-8", errors="replace") as f:
-            lines = []
-            for i, line in enumerate(f):
-                lines.append(line.rstrip("\n"))
-                if i >= 19:
-                    break
+        lines = _read_bounded_text_lines(real_path, compressed=False, count=20)
 
         return {
             "status": "success",

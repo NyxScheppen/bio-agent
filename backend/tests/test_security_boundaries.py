@@ -138,7 +138,7 @@ def test_session_lookup_never_falls_back_to_another_session(monkeypatch, tmp_pat
 
     resolved = resolver.resolve_file_path("same.csv", session_id="victim")
 
-    assert resolved == storage / "same.csv"
+    assert resolved is None
     assert resolved != other_file
 
 

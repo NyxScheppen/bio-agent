@@ -10,22 +10,15 @@ from app.services.chat_service import handle_chat
 from app.services.session_service import delete_session_with_files
 from app.agent.context_manager import clear_session_memory
 from app.core.runtime_paths import BACKEND_ROOT, STORAGE_DIR, UPLOAD_DIR, GENERATED_DIR
+from app.utils.storage_contracts import StorageValidationError, validate_session_id
 
 router = APIRouter()
 
 def _safe_session_id(session_id: str) -> str:
-    if not session_id:
+    try:
+        return validate_session_id(session_id)
+    except StorageValidationError:
         return ""
-
-    session_id = str(session_id).strip()
-
-    if not session_id:
-        return ""
-
-    if "/" in session_id or "\\" in session_id or ".." in session_id:
-        return ""
-
-    return session_id
 
 def _safe_remove_tree(path: Path) -> dict:
     try:
@@ -128,13 +121,16 @@ def delete_chat_session_endpoint(session_id: str, db: Session = Depends(get_db))
             delete_generated=True
         )
 
-        clear_session_memory(session_id)
-
-        force_deleted_files = _force_delete_session_files(session_id)
+        delete_succeeded = isinstance(result, dict) and result.get("status") == "success"
+        if delete_succeeded:
+            clear_session_memory(session_id)
+            force_deleted_files = _force_delete_session_files(session_id)
+        else:
+            force_deleted_files = []
 
         if isinstance(result, dict):
             result["force_deleted_files"] = force_deleted_files
-            result["session_memory_cleared"] = True
+            result["session_memory_cleared"] = delete_succeeded
             return result
 
         return {
@@ -146,12 +142,9 @@ def delete_chat_session_endpoint(session_id: str, db: Session = Depends(get_db))
     except Exception as e:
         print(f"🔥 删除会话接口报错: {e}")
 
-        clear_session_memory(session_id)
-        force_deleted_files = _force_delete_session_files(session_id)
-
         return {
             "status": "error",
             "message": f"删除会话失败：{str(e)}",
-            "force_deleted_files": force_deleted_files,
-            "session_memory_cleared": True
+            "force_deleted_files": [],
+            "session_memory_cleared": False,
         }

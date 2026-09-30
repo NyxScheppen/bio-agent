@@ -1,5 +1,10 @@
 from app.agent.tool_registry import register_tool
-from app.tools.r_tools import run_r_analysis
+from app.tools.r_tools import (
+    run_r_analysis,
+    r_escape_string_content,
+    r_string_literal,
+    validate_r_column_name,
+)
 from app.tools.r_preprocess_templates import (
     build_single_value_preprocess_r,
     build_matrix_preprocess_r,
@@ -33,7 +38,8 @@ def run_single_gene_clinical_association_analysis(
     gene: str,
     clinical_col: str,
     plot_type: str = "boxplot",
-    expression_preprocess: str = "auto"
+    expression_preprocess: str = "auto",
+    job_dir: str = None,
 ):
     geom_code = """
 geom_boxplot(outlier.shape = NA, alpha = 0.7)
@@ -42,6 +48,9 @@ geom_violin(alpha = 0.7, trim = FALSE)
 """
 
     preprocess_r = build_single_value_preprocess_r(expression_preprocess)
+    file_path = r_escape_string_content(file_path)
+    gene = r_escape_string_content(validate_r_column_name(gene))
+    clinical_col = r_escape_string_content(validate_r_column_name(clinical_col))
 
     r_code = f'''
 library(data.table)
@@ -108,7 +117,7 @@ write.csv(stat_df, "single_gene_clinical_stats.csv", row.names = FALSE)
 
 cat("生成文件: preprocess_log2_info.csv, single_gene_clinical_association.png, single_gene_clinical_summary.csv, single_gene_clinical_stats.csv\\n")
 '''
-    return run_r_analysis(r_code, job_subdir="single_gene_clinical")
+    return run_r_analysis(r_code, job_subdir="single_gene_clinical", job_dir=job_dir)
 
 
 @register_tool(
@@ -139,10 +148,14 @@ def run_single_gene_roc_analysis(
     gene: str,
     label_col: str,
     positive_class: str = "",
-    expression_preprocess: str = "auto"
+    expression_preprocess: str = "auto",
+    job_dir: str = None,
 ):
-    pos_expr = f'"{positive_class}"' if positive_class else 'NULL'
+    pos_expr = r_string_literal(positive_class) if positive_class else 'NULL'
     preprocess_r = build_single_value_preprocess_r(expression_preprocess)
+    file_path = r_escape_string_content(file_path)
+    gene = r_escape_string_content(validate_r_column_name(gene))
+    label_col = r_escape_string_content(validate_r_column_name(label_col))
 
     r_code = f'''
 library(data.table)
@@ -197,7 +210,7 @@ write.csv(coords_df, "single_gene_roc_best_cutoff.csv", row.names = FALSE)
 
 cat("生成文件: preprocess_log2_info.csv, single_gene_roc_curve.png, single_gene_roc_metrics.csv, single_gene_roc_best_cutoff.csv\\n")
 '''
-    return run_r_analysis(r_code, job_subdir="single_gene_roc")
+    return run_r_analysis(r_code, job_subdir="single_gene_roc", job_dir=job_dir)
 
 
 @register_tool(
@@ -222,9 +235,13 @@ def run_single_gene_expression_analysis(
     expression_file: str,
     group_file: str,
     gene: str,
-    expression_preprocess: str = "auto"
+    expression_preprocess: str = "auto",
+    job_dir: str = None,
 ):
     preprocess_r = build_single_value_preprocess_r(expression_preprocess)
+    expression_file = r_escape_string_content(expression_file)
+    group_file = r_escape_string_content(group_file)
+    gene = r_escape_string_content(gene)
 
     r_code = f'''
 library(data.table)
@@ -271,7 +288,7 @@ ggsave("single_gene_expression_boxplot.png", p, width = 7, height = 5, dpi = 150
 
 cat("生成文件: preprocess_log2_info.csv, single_gene_expression_values.csv, single_gene_expression_boxplot.png\\n")
 '''
-    return run_r_analysis(r_code, job_subdir="single_gene_expression")
+    return run_r_analysis(r_code, job_subdir="single_gene_expression", job_dir=job_dir)
 
 
 @register_tool(
@@ -294,9 +311,12 @@ cat("生成文件: preprocess_log2_info.csv, single_gene_expression_values.csv, 
 def run_expression_correlation_analysis(
     expression_file: str,
     gene: str,
-    expression_preprocess: str = "auto"
+    expression_preprocess: str = "auto",
+    job_dir: str = None,
 ):
     preprocess_r = build_matrix_preprocess_r(expression_preprocess)
+    expression_file = r_escape_string_content(expression_file)
+    gene = r_escape_string_content(gene)
 
     r_code = f'''
 library(data.table)
@@ -340,4 +360,4 @@ ggsave("gene_correlation_top20.png", p, width = 8, height = 6, dpi = 150)
 
 cat("生成文件: preprocess_log2_info.csv, gene_correlation_results.csv, gene_correlation_top20.png\\n")
 '''
-    return run_r_analysis(r_code, job_subdir="gene_correlation")
+    return run_r_analysis(r_code, job_subdir="gene_correlation", job_dir=job_dir)

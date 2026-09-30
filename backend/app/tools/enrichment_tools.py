@@ -1,5 +1,5 @@
 from app.agent.tool_registry import register_tool
-from app.tools.r_tools import run_r_analysis
+from app.tools.r_tools import run_r_analysis, r_escape_string_content
 
 @register_tool(
     name="run_go_kegg_enrichment",
@@ -20,10 +20,15 @@ from app.tools.r_tools import run_r_analysis
         "required": ["gene_file"]
     }
 )
-def run_go_kegg_enrichment(gene_file: str, organism: str = "human"):
+def run_go_kegg_enrichment(
+    gene_file: str,
+    organism: str = "human",
+    job_dir: str = None,
+):
     org_pkg = "org.Hs.eg.db" if organism.lower() == "human" else "org.Mm.eg.db"
     org_db = "org.Hs.eg.db" if organism.lower() == "human" else "org.Mm.eg.db"
     kegg_org = "hsa" if organism.lower() == "human" else "mmu"
+    gene_file = r_escape_string_content(gene_file)
 
     r_code = f'''
 library(data.table)
@@ -79,7 +84,7 @@ if (nrow(kegg_df) > 0) {{
 
 cat("生成文件: go_enrichment_results.csv, kegg_enrichment_results.csv, go_dotplot.png, kegg_dotplot.png\\n")
 '''
-    return run_r_analysis(r_code)
+    return run_r_analysis(r_code, job_subdir="go_kegg", job_dir=job_dir)
 
 @register_tool(
     name="run_gsea_analysis",
@@ -100,9 +105,14 @@ cat("生成文件: go_enrichment_results.csv, kegg_enrichment_results.csv, go_do
         "required": ["ranked_gene_file"]
     }
 )
-def run_gsea_analysis(ranked_gene_file: str, organism: str = "human"):
+def run_gsea_analysis(
+    ranked_gene_file: str,
+    organism: str = "human",
+    job_dir: str = None,
+):
     species = "Homo sapiens" if organism.lower() == "human" else "Mus musculus"
     org_db = "org.Hs.eg.db" if organism.lower() == "human" else "org.Mm.eg.db"
+    ranked_gene_file = r_escape_string_content(ranked_gene_file)
 
     r_code = f'''
 library(data.table)
@@ -141,7 +151,7 @@ if (nrow(res_df) > 0) {{
 
 cat("生成文件: gsea_results.csv, gsea_dotplot.png\\n")
 '''
-    return run_r_analysis(r_code)
+    return run_r_analysis(r_code, job_subdir="gsea", job_dir=job_dir)
 
 @register_tool(
     name="run_gsva_analysis",
@@ -160,8 +170,15 @@ cat("生成文件: gsea_results.csv, gsea_dotplot.png\\n")
         "required": ["expression_file", "group_file"]
     }
 )
-def run_gsva_analysis(expression_file: str, group_file: str, organism: str = "human"):
+def run_gsva_analysis(
+    expression_file: str,
+    group_file: str,
+    organism: str = "human",
+    job_dir: str = None,
+):
     species = "Homo sapiens" if organism.lower() == "human" else "Mus musculus"
+    expression_file = r_escape_string_content(expression_file)
+    group_file = r_escape_string_content(group_file)
 
     r_code = f'''
 library(data.table)
@@ -217,4 +234,4 @@ dev.off()
 
 cat("生成文件: gsva_scores.csv, gsva_diff_pathways.csv, gsva_heatmap.png\\n")
 '''
-    return run_r_analysis(r_code, job_subdir="gsva")
+    return run_r_analysis(r_code, job_subdir="gsva", job_dir=job_dir)

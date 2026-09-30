@@ -1,3 +1,17 @@
+_EXPRESSION_PREPROCESS_MODES = {"auto", "log2", "non_log2", "raw_count"}
+_FEATURE_PREPROCESS_MODES = _EXPRESSION_PREPROCESS_MODES | {"none"}
+
+
+def _validate_preprocess_mode(value: str, *, allow_none: bool = False) -> str:
+    mode = str(value or "auto").strip().lower()
+    allowed = _FEATURE_PREPROCESS_MODES if allow_none else _EXPRESSION_PREPROCESS_MODES
+    if mode not in allowed:
+        raise ValueError(
+            "预处理模式仅支持: " + " / ".join(sorted(allowed))
+        )
+    return mode
+
+
 def build_expression_preprocess_r(expr_cols_r: str, preprocess_mode: str = "auto") -> str:
     """
     用于 survival / Cox / 预后模型这类“data.frame 中指定表达列”的预处理。
@@ -13,6 +27,7 @@ def build_expression_preprocess_r(expr_cols_r: str, preprocess_mode: str = "auto
     - expression_preprocess_mode
     - auto_preprocess_expression(df, expr_cols, mode)
     """
+    preprocess_mode = _validate_preprocess_mode(preprocess_mode)
     return f'''
 expr_cols <- {expr_cols_r}
 expression_preprocess_mode <- "{preprocess_mode}"
@@ -88,6 +103,7 @@ def build_single_value_preprocess_r(preprocess_mode: str = "auto") -> str:
     - expression_preprocess_mode
     - auto_preprocess_vector(x, mode)
     """
+    preprocess_mode = _validate_preprocess_mode(preprocess_mode)
     return f'''
 expression_preprocess_mode <- "{preprocess_mode}"
 
@@ -150,6 +166,7 @@ def build_matrix_preprocess_r(preprocess_mode: str = "auto") -> str:
     - expression_preprocess_mode
     - auto_preprocess_matrix(mat, mode)
     """
+    preprocess_mode = _validate_preprocess_mode(preprocess_mode)
     return f'''
 expression_preprocess_mode <- "{preprocess_mode}"
 
@@ -219,6 +236,7 @@ def build_feature_df_preprocess_r(feature_cols_r: str, preprocess_mode: str = "a
     - feature_preprocess_mode
     - auto_preprocess_feature_df(df, feature_cols, mode)
     """
+    preprocess_mode = _validate_preprocess_mode(preprocess_mode, allow_none=True)
     return f'''
 feature_cols <- {feature_cols_r}
 feature_preprocess_mode <- "{preprocess_mode}"

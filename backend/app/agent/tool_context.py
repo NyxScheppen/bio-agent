@@ -14,6 +14,7 @@ from datetime import datetime
 from typing import Any, Dict, Optional
 
 from app.core.runtime_paths import GENERATED_DIR
+from app.utils.storage_contracts import validate_session_id
 
 
 # 在 GENERATED_DIR 下按 session 组织 job 目录
@@ -22,7 +23,7 @@ from app.core.runtime_paths import GENERATED_DIR
 #   generated/{job_id}/
 def _make_job_dir(session_id: str = "", job_id: str = "") -> Path:
     """构建 job 输出目录路径并自动创建。"""
-    sid = _safe_path_segment(session_id)
+    sid = validate_session_id(session_id) if session_id else ""
     jid = _safe_path_segment(job_id)
 
     if sid and jid:
@@ -81,7 +82,7 @@ class ToolExecutionContext:
     ):
         self.tool_name = str(tool_name or "")
         self.tool_category = str(tool_category or "")
-        self.session_id = str(session_id or "")
+        self.session_id = validate_session_id(session_id) if session_id else ""
         self.parameters = dict(parameters or {})
 
         # 生成 job_id

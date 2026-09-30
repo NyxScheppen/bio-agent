@@ -34,11 +34,26 @@ def _safe_name(name: str, default: str = "network_pharmacology"):
     return name[:80] or default
 
 
-def _make_job_dir(job_subdir: str = ""):
-    job_id = _safe_name(job_subdir) if job_subdir else f"network_pharmacology_{str(uuid.uuid4())[:8]}"
-    job_dir = Path(GENERATED_DIR) / job_id
-    job_dir.mkdir(parents=True, exist_ok=True)
-    return job_id, job_dir
+def _make_job_dir(job_subdir: str = "", job_dir: str = None):
+    generated_root = Path(GENERATED_DIR).resolve()
+    if job_dir:
+        resolved = Path(job_dir).resolve()
+        try:
+            resolved.relative_to(generated_root)
+        except ValueError as exc:
+            raise ValueError("网络药理学输出目录必须位于 generated 目录内") from exc
+        resolved.mkdir(parents=True, exist_ok=True)
+        return resolved.name, resolved
+
+    label = _safe_name(job_subdir) if job_subdir else "network_pharmacology"
+    job_id = f"{label}_{uuid.uuid4().hex[:8]}"
+    resolved = generated_root / job_id
+    resolved.mkdir(parents=True, exist_ok=False)
+    return job_id, resolved
+
+
+def _job_relative_path(job_dir: Path) -> str:
+    return f"generated/{job_dir.relative_to(GENERATED_DIR).as_posix()}"
 
 
 def _file_record(path: Path):
@@ -621,10 +636,11 @@ def run_ppi_network_analysis(
     species: str = "human",
     ppi_confidence: float = 0.7,
     top_n: int = 20,
-    session_id: str = None
+    session_id: str = None,
+    job_dir: str = None,
 ):
     try:
-        job_id, job_dir = _make_job_dir("ppi_network_analysis")
+        job_id, job_dir = _make_job_dir("ppi_network_analysis", job_dir)
 
         target_df, _ = _read_table_any(target_file, session_id=session_id)
         disease_target_df = _prepare_disease_targets(target_df)
@@ -687,7 +703,7 @@ def run_ppi_network_analysis(
             "status": "success",
             "message": "PPI 网络分析完成。",
             "job_id": job_id,
-            "job_dir": f"generated/{job_id}",
+            "job_dir": _job_relative_path(job_dir),
             "summary": {
                 "input_gene_count": len(genes),
                 "mapped_string_count": len(mapped_df),
@@ -770,10 +786,11 @@ def run_network_pharmacology_analysis(
     species: str = "human",
     ppi_confidence: float = 0.7,
     top_n: int = 20,
-    session_id: str = None
+    session_id: str = None,
+    job_dir: str = None,
 ):
     try:
-        job_id, job_dir = _make_job_dir("network_pharmacology")
+        job_id, job_dir = _make_job_dir("network_pharmacology", job_dir)
 
         compound_df, compound_real_path = _read_table_any(compound_target_file, session_id=session_id)
         disease_df, disease_real_path = _read_table_any(disease_target_file, session_id=session_id)
@@ -863,7 +880,7 @@ def run_network_pharmacology_analysis(
             "status": "success",
             "message": "网络药理学分析完成。",
             "job_id": job_id,
-            "job_dir": f"generated/{job_id}",
+            "job_dir": _job_relative_path(job_dir),
             "summary": {
                 "compound_file": str(compound_real_path),
                 "disease_target_file": str(disease_real_path),

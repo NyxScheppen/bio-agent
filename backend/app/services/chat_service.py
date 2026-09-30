@@ -1,10 +1,19 @@
 import re
+import heapq
 from pathlib import Path
+from urllib.parse import unquote
 from typing import Any, Dict, List
 
 from app.agent.bio_agent import run_bio_agent
 from app.db import crud
-from app.core.paths import STORAGE_DIR, GENERATED_DIR
+from app.core.paths import STORAGE_DIR
+from app.utils.storage_contracts import (
+    artifact_relative_path_for_session,
+    StorageValidationError,
+    generated_relative_path_for_session,
+    session_generated_dir,
+    validate_session_id,
+)
 from app.utils.file_utils import detect_file_type, build_file_url
 from app.utils.response_formatter import (
     extract_generated_files_from_reply,
@@ -49,7 +58,7 @@ def generate_session_title(first_user_message: str = "", first_uploaded_filename
 
     return text
 
-def resolve_generated_files(file_refs: list):
+def resolve_generated_files(file_refs: list, session_id: str):
     """
     根据模型回复里提到的文件名或相对路径，
     在 GENERATED_DIR 下递归查找真实文件。
@@ -57,6 +66,8 @@ def resolve_generated_files(file_refs: list):
     这是旧兜底逻辑：
     如果 Agent 没有显式返回 files，才靠文本解析找文件。
     """
+    sid = validate_session_id(session_id)
+    session_root = session_generated_dir(sid, create=False)
     files = []
     seen = set()
 
@@ -64,45 +75,44 @@ def resolve_generated_files(file_refs: list):
         if not ref:
             continue
 
-        ref = str(ref).replace("\\", "/").strip()
+        ref = unquote(str(ref)).replace("\\", "/").strip()
 
         if ref.startswith("/files/"):
             ref = ref[len("/files/"):]
 
-        if ref.startswith("generated/"):
-            full_path = Path(STORAGE_DIR) / ref
-            if full_path.exists() and full_path.is_file():
-                relative_path = full_path.relative_to(STORAGE_DIR).as_posix()
-                if relative_path not in seen:
-                    seen.add(relative_path)
-                    files.append({
-                        "url": build_file_url(relative_path),
-                        "name": full_path.name,
-                        "type": detect_file_type(full_path.name),
-                        "relative_path": relative_path
-                    })
+        if ref.startswith("generated/") or "/" in ref:
+            candidate = ref if ref.startswith("generated/") else f"generated/{sid}/{ref}"
+            relative_path = generated_relative_path_for_session(candidate, sid)
+            if relative_path and relative_path not in seen:
+                full_path = Path(STORAGE_DIR) / relative_path
+                seen.add(relative_path)
+                files.append({
+                    "url": build_file_url(relative_path),
+                    "name": full_path.name,
+                    "type": detect_file_type(full_path.name),
+                    "relative_path": relative_path,
+                })
             continue
 
-        if "/" in ref:
-            full_path = Path(GENERATED_DIR) / ref
-            if full_path.exists() and full_path.is_file():
-                relative_path = full_path.relative_to(STORAGE_DIR).as_posix()
-                if relative_path not in seen:
-                    seen.add(relative_path)
-                    files.append({
-                        "url": build_file_url(relative_path),
-                        "name": full_path.name,
-                        "type": detect_file_type(full_path.name),
-                        "relative_path": relative_path
-                    })
+        if not session_root.exists() or Path(ref).name != ref:
             continue
-
-        matches = [p for p in Path(GENERATED_DIR).rglob(ref) if p.is_file()]
-        matches.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+        matches = heapq.nlargest(
+            3,
+            (
+                path for path in session_root.rglob("*")
+                if path.is_file() and not path.is_symlink() and path.name == ref
+            ),
+            key=lambda path: path.stat().st_mtime,
+        )
 
         # 只取最新的少量文件，避免历史同名文件全被捞出来
-        for path in matches[:3]:
-            relative_path = path.relative_to(STORAGE_DIR).as_posix()
+        for path in matches:
+            relative_path = generated_relative_path_for_session(
+                path.relative_to(STORAGE_DIR).as_posix(),
+                sid,
+            )
+            if not relative_path:
+                continue
             if relative_path in seen:
                 continue
 
@@ -115,7 +125,10 @@ def resolve_generated_files(file_refs: list):
             })
 
     return files
-def normalize_agent_file(file_obj: Dict[str, Any]) -> Dict[str, Any] | None:
+def normalize_agent_file(
+    file_obj: Dict[str, Any],
+    session_id: str,
+) -> Dict[str, Any] | None:
     """
     统一 Agent / Tool 返回的文件结构，确保前端能识别。
 
@@ -130,7 +143,6 @@ def normalize_agent_file(file_obj: Dict[str, Any]) -> Dict[str, Any] | None:
     if not isinstance(file_obj, dict):
         return None
 
-    name = str(file_obj.get("name") or "").strip()
     relative_path = str(file_obj.get("relative_path") or "").strip()
     url = str(file_obj.get("url") or "").strip()
     path = str(file_obj.get("path") or "").strip()
@@ -147,7 +159,7 @@ def normalize_agent_file(file_obj: Dict[str, Any]) -> Dict[str, Any] | None:
     if relative_path.startswith("/files/"):
         relative_path = relative_path[len("/files/"):].strip("/")
 
-    relative_path = relative_path.replace("\\", "/")
+    relative_path = unquote(relative_path).replace("\\", "/")
 
     if path and not relative_path:
         try:
@@ -157,23 +169,15 @@ def normalize_agent_file(file_obj: Dict[str, Any]) -> Dict[str, Any] | None:
         except Exception:
             pass
 
-    if relative_path and not url:
-        url = build_file_url(relative_path)
-
-    if not name:
-        if relative_path:
-            name = Path(relative_path).name
-        elif path:
-            name = Path(path).name
-        elif url:
-            name = Path(url).name
-
-    if not name and not relative_path and not url:
+    try:
+        relative_path = generated_relative_path_for_session(relative_path, session_id)
+    except StorageValidationError:
         return None
-
-    file_type = str(file_obj.get("type") or file_obj.get("file_type") or "").strip()
-    if not file_type:
-        file_type = detect_file_type(name or relative_path or url)
+    if not relative_path:
+        return None
+    url = build_file_url(relative_path)
+    name = Path(relative_path).name
+    file_type = detect_file_type(name)
 
     return {
         "url": url,
@@ -182,7 +186,7 @@ def normalize_agent_file(file_obj: Dict[str, Any]) -> Dict[str, Any] | None:
         "relative_path": relative_path
     }
 
-def dedupe_files(files: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def dedupe_files(files: List[Dict[str, Any]], session_id: str) -> List[Dict[str, Any]]:
     """
     文件去重。
     """
@@ -190,7 +194,7 @@ def dedupe_files(files: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     seen = set()
 
     for f in files or []:
-        nf = normalize_agent_file(f)
+        nf = normalize_agent_file(f, session_id)
         if not nf:
             continue
 
@@ -208,14 +212,17 @@ def dedupe_files(files: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
     return result
 
-def merge_files(*file_lists: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def merge_files(
+    *file_lists: List[Dict[str, Any]],
+    session_id: str,
+) -> List[Dict[str, Any]]:
     """
     合并多个文件列表并去重。
     """
     merged = []
     for file_list in file_lists:
         merged.extend(file_list or [])
-    return dedupe_files(merged)
+    return dedupe_files(merged, session_id)
 
 def build_uploaded_files_context(session_id: str, attached_files: list) -> str:
     """
@@ -243,6 +250,34 @@ def build_uploaded_files_context(session_id: str, attached_files: list) -> str:
     lines.append("不要声称“找不到文件”，除非你已经明确检查过这些路径不存在。")
 
     return "\n".join(lines)
+
+
+def validate_attached_files(session_id: str, attached_files: list) -> list:
+    """Discard forged, missing, or cross-session attachment references."""
+    sid = validate_session_id(session_id)
+    result = []
+    seen = set()
+    for item in attached_files or []:
+        if not isinstance(item, dict):
+            continue
+        filename = str(item.get("filename") or item.get("name") or "").strip()
+        relative_path = str(item.get("relative_path") or "").strip()
+        if not relative_path and filename:
+            relative_path = f"uploads/{sid}/{Path(filename).name}"
+        canonical = artifact_relative_path_for_session(relative_path, sid)
+        if not canonical or canonical in seen:
+            continue
+        target = Path(STORAGE_DIR) / canonical
+        seen.add(canonical)
+        result.append({
+            "filename": target.name,
+            "relative_path": canonical,
+            "url": build_file_url(canonical),
+            "type": detect_file_type(target.name),
+            "size_bytes": target.stat().st_size,
+            "source_type": canonical.split("/", 1)[0].rstrip("s"),
+        })
+    return result
 
 def prepend_file_context(messages: list, file_context: str) -> list:
     """
@@ -356,14 +391,18 @@ async def handle_chat(db, session_id: str, messages: list, attached_files: list 
     """
     if not session_id:
         raise ValueError("handle_chat 缺少 session_id，禁止使用空 session_id 发起会话，避免记忆串号。")
+    session_id = validate_session_id(session_id)
 
     crud.create_session(db, session_id=session_id)
 
-    attached_files = attached_files or []
+    attached_files = validate_attached_files(session_id, attached_files or [])
     standard_messages = normalize_frontend_messages(messages)
 
     if not attached_files:
-        attached_files = fallback_attached_files_from_db(db, session_id)
+        attached_files = validate_attached_files(
+            session_id,
+            fallback_attached_files_from_db(db, session_id),
+        )
 
     print(f"🧾 handle_chat session_id={session_id}")
     print(f"🧾 attached_files={attached_files}")
@@ -416,10 +455,10 @@ async def handle_chat(db, session_id: str, messages: list, attached_files: list 
         text_files = []
     else:
         file_refs = extract_generated_files_from_reply(answer)
-        text_files = resolve_generated_files(file_refs)
+        text_files = resolve_generated_files(file_refs, session_id)
 
     # 新主链路：优先使用 Agent / Executor 真实返回的 output_files。
-    files = merge_files(agent_files, text_files)
+    files = merge_files(agent_files, text_files, session_id=session_id)
 
     print(
         "📦 handle_chat files returned to frontend="
@@ -443,6 +482,8 @@ async def handle_chat(db, session_id: str, messages: list, attached_files: list 
         if not relative_path or not name:
             continue
 
+        if crud.get_file_record_by_path(db, session_id, relative_path):
+            continue
         crud.save_file_record(
             db=db,
             session_id=session_id,

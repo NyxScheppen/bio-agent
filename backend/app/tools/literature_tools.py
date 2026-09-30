@@ -4,6 +4,7 @@ import re
 import requests
 import socket
 import ssl
+import uuid
 import urllib3
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -699,7 +700,7 @@ def fetch_paper_details(identifier: str):
 
 @register_tool(
     name="download_open_access_pdf",
-    description="下载开放获取的论文 PDF。输入可以是 PDF 链接、PMCID，或 DOI（若能解析到 PDF）。PDF 将保存到 generated/literature/ 目录。",
+    description="下载开放获取的论文 PDF。输入可以是 PDF 链接、PMCID，或 DOI（若能解析到 PDF）。PDF 将保存到当前会话的独立任务目录。",
     parameters={
         "type": "object",
         "properties": {
@@ -716,7 +717,11 @@ def fetch_paper_details(identifier: str):
         "required": ["identifier_or_url"]
     }
 )
-def download_open_access_pdf(identifier_or_url: str, filename_hint: str = ""):
+def download_open_access_pdf(
+    identifier_or_url: str,
+    filename_hint: str = "",
+    job_dir: str = None,
+):
     """
     下载开放获取 PDF
     """
@@ -758,14 +763,24 @@ def download_open_access_pdf(identifier_or_url: str, filename_hint: str = ""):
         if not safe_name.lower().endswith(".pdf"):
             safe_name += ".pdf"
 
-        save_path = LITERATURE_DIR / safe_name
+        generated_root = Path(GENERATED_DIR).resolve()
+        if job_dir:
+            output_dir = Path(job_dir).resolve()
+            try:
+                output_dir.relative_to(generated_root)
+            except ValueError as exc:
+                raise ValueError("PDF 输出目录必须位于 generated 目录内") from exc
+        else:
+            output_dir = LITERATURE_DIR / f"download_{uuid.uuid4().hex[:8]}"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        save_path = output_dir / safe_name
 
         pdf_content, final_url = _download_public_pdf(pdf_url, timeout=30)
 
         with open(save_path, "wb") as f:
             f.write(pdf_content)
 
-        relative_path = f"generated/literature/{save_path.name}"
+        relative_path = f"generated/{save_path.relative_to(GENERATED_DIR).as_posix()}"
         url = build_file_url(relative_path)
 
         return json.dumps({
@@ -774,7 +789,14 @@ def download_open_access_pdf(identifier_or_url: str, filename_hint: str = ""):
             "relative_path": relative_path,
             "url": url,
             "pdf_url": pdf_url,
-            "final_url": final_url
+            "final_url": final_url,
+            "output_files": [{
+                "name": save_path.name,
+                "relative_path": relative_path,
+                "url": url,
+                "size_bytes": save_path.stat().st_size,
+                "file_type": "pdf",
+            }],
         }, ensure_ascii=False)
 
     except Exception as e:

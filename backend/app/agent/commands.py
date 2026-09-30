@@ -172,7 +172,6 @@ def build_help_response() -> Dict[str, Any]:
 
     return {
         "task_type": "general",
-        "suggested_mode": "direct_answer",
         "tool_categories": ["general"],
         "help_text": help_text,
         "total_commands": len(COMMANDS),

@@ -1,0 +1,238 @@
+{
+  "generated_at": "2026-09-30T01:05:11.531944+00:00",
+  "nodes": {
+    "backend_app_agent_bio_agent_run_bio_agent": {
+      "code_fingerprint": "d22e4a7333276612796d29cfbd10ed74dfc50c95b92d6ef06c79ac1b13f3063b",
+      "label": "run_bio_agent()",
+      "last": "2026-09-29T13:43:09.861246+00:00",
+      "provenance": [
+        {
+          "date": "2026-09-29T13:43:09.861246+00:00",
+          "outcome": "useful",
+          "q": "分析边缘情况然后写修改计划，然后实现，实现之后写一份多agent的行为文档"
+        }
+      ],
+      "score": 0.989116472,
+      "source_file": "backend/app/agent/bio_agent.py",
+      "status": "tentative",
+      "uses": 1
+    },
+    "backend_app_agent_delegator_agent_run_delegator_agent": {
+      "code_fingerprint": "9e9f4ad4f4354cece70f3f43d3454bdad27cd0913c6371f9eb082ce8e9b62901",
+      "label": "run_delegator_agent()",
+      "last": "2026-09-29T23:42:34.818773+00:00",
+      "provenance": [
+        {
+          "date": "2026-09-29T23:42:34.818773+00:00",
+          "outcome": "useful",
+          "q": "复核并修复四项多 Agent 发现：Skill 工具白名单绕过、超时任务重复重试、parallel_groups 语义丢失、未满足的 $step_N 引用被透传。"
+        },
+        {
+          "date": "2026-09-29T13:43:09.861246+00:00",
+          "outcome": "useful",
+          "q": "分析边缘情况然后写修改计划，然后实现，实现之后写一份多agent的行为文档"
+        },
+        {
+          "date": "2026-09-29T12:55:14.925251+00:00",
+          "outcome": "useful",
+          "q": "帮我检查多agent相关的错误"
+        }
+      ],
+      "score": 2.976148158,
+      "source_file": "backend/app/agent/delegator_agent.py",
+      "status": "preferred",
+      "uses": 3
+    },
+    "backend_app_agent_executor_agent_run_parallel_execution": {
+      "code_fingerprint": "300a053e699c109dd78c800cc41f0fb88270e662af7d0af4ee07e21594bab41d",
+      "label": "_run_parallel_execution()",
+      "last": "2026-09-29T12:55:14.925251+00:00",
+      "provenance": [
+        {
+          "date": "2026-09-29T12:55:14.925251+00:00",
+          "outcome": "useful",
+          "q": "帮我检查多agent相关的错误"
+        }
+      ],
+      "score": 0.988356322,
+      "source_file": "backend/app/agent/executor_agent.py",
+      "status": "tentative",
+      "uses": 1
+    },
+    "backend_app_agent_orchestrator_orchestrator": {
+      "code_fingerprint": "b37d95998820e7bef939f0c3044a8f67ba31929edf60e92cb128d3ced8604768",
+      "label": "Orchestrator",
+      "last": "2026-09-29T23:42:34.818773+00:00",
+      "provenance": [
+        {
+          "date": "2026-09-29T23:42:34.818773+00:00",
+          "outcome": "useful",
+          "q": "复核并修复四项多 Agent 发现：Skill 工具白名单绕过、超时任务重复重试、parallel_groups 语义丢失、未满足的 $step_N 引用被透传。"
+        },
+        {
+          "date": "2026-09-29T14:19:39.763217+00:00",
+          "outcome": "useful",
+          "q": "审查最后一次提交，只检查安全、性能和逻辑问题，忽略代码风格。每个问题必须给出文件、行号和触发条件。"
+        },
+        {
+          "date": "2026-09-29T13:43:09.861246+00:00",
+          "outcome": "useful",
+          "q": "分析边缘情况然后写修改计划，然后实现，实现之后写一份多agent的行为文档"
+        },
+        {
+          "date": "2026-09-29T12:55:14.925251+00:00",
+          "outcome": "useful",
+          "q": "帮我检查多agent相关的错误"
+        }
+      ],
+      "score": 3.965844045,
+      "source_file": "backend/app/agent/orchestrator.py",
+      "status": "preferred",
+      "uses": 4
+    },
+    "backend_app_agent_parallel_executor": {
+      "code_fingerprint": "58dd2c24c22c575fb8af398030eb9ef3920f237e99c2996aef222b4bad1231a0",
+      "label": "parallel_executor.py",
+      "last": "2026-09-29T14:19:39.763217+00:00",
+      "provenance": [
+        {
+          "date": "2026-09-29T14:19:39.763217+00:00",
+          "outcome": "useful",
+          "q": "审查最后一次提交，只检查安全、性能和逻辑问题，忽略代码风格。每个问题必须给出文件、行号和触发条件。"
+        }
+      ],
+      "score": 0.989695887,
+      "source_file": "backend/app/agent/parallel_executor.py",
+      "status": "tentative",
+      "uses": 1
+    },
+    "backend_app_agent_parallel_executor_execute_parallel_steps": {
+      "code_fingerprint": "58dd2c24c22c575fb8af398030eb9ef3920f237e99c2996aef222b4bad1231a0",
+      "label": "execute_parallel_steps()",
+      "last": "2026-09-29T13:43:09.861246+00:00",
+      "provenance": [
+        {
+          "date": "2026-09-29T13:43:09.861246+00:00",
+          "outcome": "useful",
+          "q": "分析边缘情况然后写修改计划，然后实现，实现之后写一份多agent的行为文档"
+        }
+      ],
+      "score": 0.989116472,
+      "source_file": "backend/app/agent/parallel_executor.py",
+      "status": "tentative",
+      "uses": 1
+    },
+    "backend_app_agent_parallel_executor_execute_single_step": {
+      "code_fingerprint": "58dd2c24c22c575fb8af398030eb9ef3920f237e99c2996aef222b4bad1231a0",
+      "label": "_execute_single_step()",
+      "last": "2026-09-29T12:55:14.925251+00:00",
+      "provenance": [
+        {
+          "date": "2026-09-29T12:55:14.925251+00:00",
+          "outcome": "useful",
+          "q": "帮我检查多agent相关的错误"
+        }
+      ],
+      "score": 0.988356322,
+      "source_file": "backend/app/agent/parallel_executor.py",
+      "status": "tentative",
+      "uses": 1
+    },
+    "backend_app_agent_racing_executor": {
+      "code_fingerprint": "f93eb669d71b10cd3d42955219130fe270327de2f2e974d2a17885abffb905c6",
+      "label": "racing_executor.py",
+      "last": "2026-09-29T12:55:14.925251+00:00",
+      "provenance": [
+        {
+          "date": "2026-09-29T12:55:14.925251+00:00",
+          "outcome": "useful",
+          "q": "帮我检查多agent相关的错误"
+        }
+      ],
+      "score": 0.988356322,
+      "source_file": "backend/app/agent/racing_executor.py",
+      "status": "tentative",
+      "uses": 1
+    },
+    "backend_app_agent_racing_executor_race_tools": {
+      "code_fingerprint": "f93eb669d71b10cd3d42955219130fe270327de2f2e974d2a17885abffb905c6",
+      "label": "race_tools()",
+      "last": "2026-09-29T13:43:09.861246+00:00",
+      "provenance": [
+        {
+          "date": "2026-09-29T13:43:09.861246+00:00",
+          "outcome": "useful",
+          "q": "分析边缘情况然后写修改计划，然后实现，实现之后写一份多agent的行为文档"
+        }
+      ],
+      "score": 0.989116472,
+      "source_file": "backend/app/agent/racing_executor.py",
+      "status": "tentative",
+      "uses": 1
+    },
+    "backend_app_agent_router_agent_call_json_agent": {
+      "code_fingerprint": "1ca4109a1ab99052064bdc6c2aacf800a14c39c0915d03a5124523e0aea65db9",
+      "label": "call_json_agent()",
+      "last": "2026-09-29T12:55:14.925251+00:00",
+      "provenance": [
+        {
+          "date": "2026-09-29T12:55:14.925251+00:00",
+          "outcome": "useful",
+          "q": "帮我检查多agent相关的错误"
+        }
+      ],
+      "score": 0.988356322,
+      "source_file": "backend/app/agent/router_agent.py",
+      "status": "tentative",
+      "uses": 1
+    },
+    "backend_app_agent_sub_agent_manager_subagentmanager": {
+      "code_fingerprint": "c3804de98c2e6b39ad2334cd5a3e93dca88a96562196860f56b31696d9b829cd",
+      "label": "SubAgentManager",
+      "last": "2026-09-29T23:42:34.818773+00:00",
+      "provenance": [
+        {
+          "date": "2026-09-29T23:42:34.818773+00:00",
+          "outcome": "useful",
+          "q": "复核并修复四项多 Agent 发现：Skill 工具白名单绕过、超时任务重复重试、parallel_groups 语义丢失、未满足的 $step_N 引用被透传。"
+        },
+        {
+          "date": "2026-09-29T14:19:39.763217+00:00",
+          "outcome": "useful",
+          "q": "审查最后一次提交，只检查安全、性能和逻辑问题，忽略代码风格。每个问题必须给出文件、行号和触发条件。"
+        },
+        {
+          "date": "2026-09-29T13:43:09.861246+00:00",
+          "outcome": "useful",
+          "q": "分析边缘情况然后写修改计划，然后实现，实现之后写一份多agent的行为文档"
+        },
+        {
+          "date": "2026-09-29T12:55:14.925251+00:00",
+          "outcome": "useful",
+          "q": "帮我检查多agent相关的错误"
+        }
+      ],
+      "score": 3.965844045,
+      "source_file": "backend/app/agent/sub_agent_manager.py",
+      "status": "preferred",
+      "uses": 4
+    },
+    "backend_app_agent_tool_runner_run_tool_with_lifecycle": {
+      "code_fingerprint": "081ffc9ab48ca64b9170f54ac279410e691ff78e91d8f21a6bc9811eae9b570d",
+      "label": "run_tool_with_lifecycle()",
+      "last": "2026-09-29T14:19:39.763217+00:00",
+      "provenance": [
+        {
+          "date": "2026-09-29T14:19:39.763217+00:00",
+          "outcome": "useful",
+          "q": "审查最后一次提交，只检查安全、性能和逻辑问题，忽略代码风格。每个问题必须给出文件、行号和触发条件。"
+        }
+      ],
+      "score": 0.989695887,
+      "source_file": "backend/app/agent/tool_runner.py",
+      "status": "tentative",
+      "uses": 1
+    }
+  },
+  "version": 1
+}

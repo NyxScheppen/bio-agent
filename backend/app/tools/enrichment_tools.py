@@ -32,14 +32,7 @@ library(enrichplot)
 library({org_pkg})
 library(ggplot2)
 
-smart_read <- function(fp) {{
-  full_path <- fp
-  if (!file.exists(full_path)) full_path <- file.path(UPLOAD_DIR, fp)
-  if (!file.exists(full_path)) stop(paste("文件不存在:", fp))
-  fread(full_path, data.table = FALSE)
-}}
-
-gene_df <- smart_read("{gene_file}")
+gene_df <- fread(smart_read("{gene_file}"), data.table = FALSE)
 if (!("gene" %in% colnames(gene_df))) stop("gene_file 必须包含 gene 列")
 
 genes <- unique(as.character(gene_df$gene))
@@ -119,14 +112,7 @@ library(msigdbr)
 library({org_db})
 library(ggplot2)
 
-smart_read <- function(fp) {{
-  full_path <- fp
-  if (!file.exists(full_path)) full_path <- file.path(UPLOAD_DIR, fp)
-  if (!file.exists(full_path)) stop(paste("文件不存在:", fp))
-  fread(full_path, data.table = FALSE)
-}}
-
-df <- smart_read("{ranked_gene_file}")
+df <- fread(smart_read("{ranked_gene_file}"), data.table = FALSE)
 if (!all(c("gene", "score") %in% colnames(df))) stop("文件必须包含 gene 和 score 列")
 
 df <- df[!is.na(df$gene) & !is.na(df$score), ]

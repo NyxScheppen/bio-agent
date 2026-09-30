@@ -166,7 +166,7 @@ bio_test/
 │
 ├── env/r_libs/                # R 私有包库
 ├── logs/                      # 日志目录
-├── docs/                      # 开发文档
+├── docs/                      # 文档（含架构思维导图 mindmap.html）
 └── runtime/                   # 运行时脚本
 ```
 
@@ -223,8 +223,12 @@ skills:
 # 工具生命周期测试
 .venv/Scripts/python.exe backend/tests/test_tool_lifecycle.py
 
+# 工具注册测试
+.venv/Scripts/python.exe backend/tests/test_tool_registration.py
+
 # Skill 系统测试
 .venv/Scripts/python.exe backend/tests/test_skill_system.py
+.venv/Scripts/python.exe backend/tests/test_skill_packs.py
 
 # 全量回归测试
 .venv/Scripts/python.exe backend/tests/test_integration.py

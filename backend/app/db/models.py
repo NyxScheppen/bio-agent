@@ -36,7 +36,7 @@ class StoredFile(Base):
     session_id = Column(String, index=True, nullable=True)
     filename = Column(String, nullable=False)
     relative_path = Column(String, nullable=False)  # 如 uploads/test.csv 或 generated/plot.png
-    file_type = Column(String, nullable=False)      # image / table / text / other
+    file_type = Column(String, nullable=False)      # image / table / text / pdf / r_data / archive / other
     source_type = Column(String, nullable=False)    # upload / generated
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 

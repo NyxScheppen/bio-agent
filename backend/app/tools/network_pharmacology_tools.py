@@ -15,6 +15,7 @@ import matplotlib.pyplot as plt
 from app.agent.tool_registry import register_tool
 from app.core.paths import GENERATED_DIR
 from app.utils.file_resolver import resolve_file_path, debug_file_context
+from app.utils.file_utils import build_file_url
 
 
 STRING_API_BASE = "https://string-db.org/api/json"
@@ -45,7 +46,7 @@ def _file_record(path: Path):
     return {
         "name": path.name,
         "relative_path": f"generated/{rel}",
-        "url": f"/files/generated/{rel}",
+        "url": build_file_url(f"generated/{rel}"),
         "size_bytes": path.stat().st_size if path.exists() else 0
     }
 
@@ -65,7 +66,7 @@ def _list_output_files(job_dir: Path):
 def _read_table_any(file_path: str, session_id: str = None):
     real_path = resolve_file_path(file_path, session_id)
 
-    if not real_path.exists():
+    if real_path is None or not real_path.exists():
         raise FileNotFoundError(
             f"文件不存在：{file_path}\n"
             f"调试信息：{debug_file_context(file_path, session_id)}"

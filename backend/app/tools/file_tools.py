@@ -176,7 +176,7 @@ def _build_preview_response(real_path, df, total_rows, file_type, nrows):
 def read_csv_data(file_path: str, nrows: int = 5, session_id: str = None):
     real_path = resolve_file_path(file_path, session_id)
 
-    if not real_path.exists():
+    if real_path is None or not real_path.exists():
         return {
             "status": "error",
             "message": f"文件不存在：{file_path}",
@@ -223,7 +223,7 @@ def read_csv_data(file_path: str, nrows: int = 5, session_id: str = None):
 def load_large_bio_data(file_path: str, session_id: str = None):
     real_path = resolve_file_path(file_path, session_id)
 
-    if not real_path.exists():
+    if real_path is None or not real_path.exists():
         debug = debug_file_context(file_path, session_id)
         return (
             f"❌ 找不到文件: {file_path}\n"
@@ -297,7 +297,7 @@ def load_large_bio_data(file_path: str, session_id: str = None):
 def preview_table_file(file_path: str, nrows: int = 5, session_id: str = None):
     real_path = resolve_file_path(file_path, session_id)
 
-    if not real_path.exists():
+    if real_path is None or not real_path.exists():
         return {
             "status": "error",
             "message": f"文件不存在: {file_path}",

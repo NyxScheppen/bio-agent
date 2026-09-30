@@ -303,6 +303,27 @@ def test_coerce_output_file():
 
 
 # ============================================================
+# test_coerce_output_file_aliases
+# ============================================================
+
+def test_coerce_output_file_aliases():
+    """_coerce_output_file 应识别 file_name / filename / file_size 别名，不静默丢弃。"""
+    # file_name → name
+    of = _coerce_output_file({"file_name": "result.csv", "url": "/files/g/result.csv"})
+    _assert_equal(of.name, "result.csv")
+
+    # filename → name
+    of2 = _coerce_output_file({"filename": "plot.png", "url": "/files/g/plot.png"})
+    _assert_equal(of2.name, "plot.png")
+
+    # file_size → size_bytes
+    of3 = _coerce_output_file({"name": "data.csv", "url": "/files/g/data.csv", "file_size": 4096})
+    _assert_equal(of3.size_bytes, 4096)
+
+    print("[PASS] test_coerce_output_file_aliases")
+
+
+# ============================================================
 # test_tool_result_to_legacy_dict
 # ============================================================
 
@@ -388,6 +409,7 @@ if __name__ == "__main__":
         ("test_normalize_tool_result_already_toolresult", test_normalize_tool_result_already_toolresult),
         ("test_normalize_tool_result_list_input", test_normalize_tool_result_list_input),
         ("test_coerce_output_file", test_coerce_output_file),
+        ("test_coerce_output_file_aliases", test_coerce_output_file_aliases),
         ("test_tool_result_to_legacy_dict", test_tool_result_to_legacy_dict),
         ("test_provenance_fields", test_provenance_fields),
         ("test_normalize_plain_string", test_normalize_plain_string),

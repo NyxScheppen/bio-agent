@@ -24,6 +24,8 @@ import json
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional
 
+from app.agent.agent_utils import to_plain_dict
+
 
 class RecoveryStrategy(ABC):
     """
@@ -76,10 +78,9 @@ class RecoveryStrategy(ABC):
             return ""
         if isinstance(result, str):
             return result
-        if hasattr(result, "model_dump"):
-            return json.dumps(result.model_dump(), ensure_ascii=False, default=str)
-        if isinstance(result, dict):
-            return json.dumps(result, ensure_ascii=False, default=str)
+        d = to_plain_dict(result)
+        if d is not None:
+            return json.dumps(d, ensure_ascii=False, default=str)
         return str(result)
 
 

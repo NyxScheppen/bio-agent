@@ -232,15 +232,8 @@ library(ggplot2)
 
 {preprocess_r}
 
-smart_read <- function(fp) {{
-  full_path <- fp
-  if (!file.exists(full_path)) full_path <- file.path(UPLOAD_DIR, fp)
-  if (!file.exists(full_path)) stop(paste("文件不存在:", fp))
-  fread(full_path, data.table = FALSE)
-}}
-
-expr <- smart_read("{expression_file}")
-grp <- smart_read("{group_file}")
+expr <- fread(smart_read("{expression_file}"), data.table = FALSE)
+grp <- fread(smart_read("{group_file}"), data.table = FALSE)
 
 if (!("gene" %in% colnames(expr))) stop("表达矩阵必须包含 gene 列")
 if (!all(c("sample", "group") %in% colnames(grp))) stop("分组文件必须包含 sample 和 group 列")
@@ -311,14 +304,7 @@ library(ggplot2)
 
 {preprocess_r}
 
-smart_read <- function(fp) {{
-  full_path <- fp
-  if (!file.exists(full_path)) full_path <- file.path(UPLOAD_DIR, fp)
-  if (!file.exists(full_path)) stop(paste("文件不存在:", fp))
-  fread(full_path, data.table = FALSE)
-}}
-
-expr <- smart_read("{expression_file}")
+expr <- fread(smart_read("{expression_file}"), data.table = FALSE)
 if (!("gene" %in% colnames(expr))) stop("表达矩阵必须包含 gene 列")
 
 rownames(expr) <- expr$gene

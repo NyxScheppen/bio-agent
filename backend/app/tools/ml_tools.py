@@ -54,15 +54,8 @@ library(ggplot2)
 
 {preprocess_r}
 
-smart_read <- function(fp) {{
-  full_path <- fp
-  if (!file.exists(full_path)) full_path <- file.path(UPLOAD_DIR, fp)
-  if (!file.exists(full_path)) stop(paste("文件不存在:", fp))
-  fread(full_path, data.table = FALSE)
-}}
-
 set.seed(123)
-df <- smart_read("{file_path}")
+df <- fread(smart_read("{file_path}"), data.table = FALSE)
 
 if (!("{label_col}" %in% colnames(df))) stop("找不到标签列")
 df <- df[complete.cases(df), ]
@@ -180,14 +173,7 @@ library(glmnet)
 
 {preprocess_r}
 
-smart_read <- function(fp) {{
-  full_path <- fp
-  if (!file.exists(full_path)) full_path <- file.path(UPLOAD_DIR, fp)
-  if (!file.exists(full_path)) stop(paste("文件不存在:", fp))
-  fread(full_path, data.table = FALSE)
-}}
-
-df <- smart_read("{file_path}")
+df <- fread(smart_read("{file_path}"), data.table = FALSE)
 if (!("{label_col}" %in% colnames(df))) stop("找不到标签列")
 df <- df[complete.cases(df), ]
 if (nrow(df) < 20) stop("样本数太少")
@@ -278,15 +264,8 @@ library(pROC)
 
 {preprocess_r}
 
-smart_read <- function(fp) {{
-  full_path <- fp
-  if (!file.exists(full_path)) full_path <- file.path(UPLOAD_DIR, fp)
-  if (!file.exists(full_path)) stop(paste("文件不存在:", fp))
-  fread(full_path, data.table = FALSE)
-}}
-
 set.seed(123)
-df <- smart_read("{file_path}")
+df <- fread(smart_read("{file_path}"), data.table = FALSE)
 
 if (!("{label_col}" %in% colnames(df))) stop("找不到标签列")
 df <- df[complete.cases(df), ]

@@ -19,6 +19,8 @@ from typing import Any, Dict, List, Optional, Union
 
 from pydantic import BaseModel, Field
 
+from app.utils.file_utils import build_file_url
+
 
 # ============================================================
 # 核心 Pydantic 模型
@@ -226,7 +228,7 @@ def _coerce_output_file(data: Dict[str, Any]) -> OutputFile:
     - type / file_type → file_type
     - size / size_bytes → size_bytes
     """
-    name = str(data.get("name") or "").strip()
+    name = str(data.get("name") or data.get("file_name") or data.get("filename") or "").strip()
     url = str(data.get("url") or "").strip()
     relative_path = str(data.get("relative_path") or "").strip()
     path = str(data.get("path") or "").strip()
@@ -241,7 +243,7 @@ def _coerce_output_file(data: Dict[str, Any]) -> OutputFile:
 
     # 从 relative_path 反推 url
     if relative_path and not url:
-        url = f"/files/{relative_path}"
+        url = build_file_url(relative_path)
 
     # 反推 name
     if not name:
@@ -250,7 +252,7 @@ def _coerce_output_file(data: Dict[str, Any]) -> OutputFile:
         elif url:
             name = Path(url.split("?")[0]).name
 
-    size_bytes = data.get("size_bytes") or data.get("size")
+    size_bytes = data.get("size_bytes") or data.get("size") or data.get("file_size")
     try:
         size_bytes = int(size_bytes) if size_bytes is not None and size_bytes != "" else None
     except (ValueError, TypeError):

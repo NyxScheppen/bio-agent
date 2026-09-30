@@ -12,6 +12,7 @@ import json
 import logging
 from typing import Any, Dict, Optional
 
+from app.agent.agent_utils import to_plain_dict
 from app.db.database import SessionLocal
 from app.db.crud import save_tool_execution
 
@@ -61,11 +62,8 @@ def audit_tool_execution(
         # output_files: 只存 name/url/relative_path 三个关键字段
         output_files_slim = []
         for f in (tool_result.output_files or []):
-            if hasattr(f, "model_dump"):
-                d = f.model_dump()
-            elif isinstance(f, dict):
-                d = f
-            else:
+            d = to_plain_dict(f)
+            if d is None:
                 continue
             output_files_slim.append({
                 "name": d.get("name", ""),
@@ -76,19 +74,17 @@ def audit_tool_execution(
 
         resource_json = None
         if prov.resource_usage:
-            if hasattr(prov.resource_usage, "model_dump"):
-                resource_json = _safe_json_dumps(prov.resource_usage.model_dump())
-            elif isinstance(prov.resource_usage, dict):
-                resource_json = _safe_json_dumps(prov.resource_usage)
+            d = to_plain_dict(prov.resource_usage)
+            if d is not None:
+                resource_json = _safe_json_dumps(d)
 
         recovery_json = None
         if hasattr(tool_result, "retry_records") and tool_result.retry_records:
             records = []
             for r in tool_result.retry_records:
-                if hasattr(r, "model_dump"):
-                    records.append(r.model_dump())
-                elif isinstance(r, dict):
-                    records.append(r)
+                d = to_plain_dict(r)
+                if d is not None:
+                    records.append(d)
             recovery_json = _safe_json_dumps(records if records else None)
 
         # 独立数据库 Session

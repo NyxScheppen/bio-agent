@@ -5,7 +5,7 @@ from typing import Any, Dict, List
 from app.agent.bio_agent import run_bio_agent
 from app.db import crud
 from app.core.paths import STORAGE_DIR, GENERATED_DIR
-from app.utils.file_utils import detect_file_type
+from app.utils.file_utils import detect_file_type, build_file_url
 from app.utils.response_formatter import (
     extract_generated_files_from_reply,
     append_markdown_if_missing
@@ -76,7 +76,7 @@ def resolve_generated_files(file_refs: list):
                 if relative_path not in seen:
                     seen.add(relative_path)
                     files.append({
-                        "url": f"/files/{relative_path}",
+                        "url": build_file_url(relative_path),
                         "name": full_path.name,
                         "type": detect_file_type(full_path.name),
                         "relative_path": relative_path
@@ -90,7 +90,7 @@ def resolve_generated_files(file_refs: list):
                 if relative_path not in seen:
                     seen.add(relative_path)
                     files.append({
-                        "url": f"/files/{relative_path}",
+                        "url": build_file_url(relative_path),
                         "name": full_path.name,
                         "type": detect_file_type(full_path.name),
                         "relative_path": relative_path
@@ -108,7 +108,7 @@ def resolve_generated_files(file_refs: list):
 
             seen.add(relative_path)
             files.append({
-                "url": f"/files/{relative_path}",
+                "url": build_file_url(relative_path),
                 "name": path.name,
                 "type": detect_file_type(path.name),
                 "relative_path": relative_path
@@ -139,7 +139,7 @@ def normalize_agent_file(file_obj: Dict[str, Any]) -> Dict[str, Any] | None:
         # 如果是完整 URL，尽量从 /files/ 后面提 relative_path
         if "/files/" in url:
             relative_path = url.split("/files/", 1)[1].strip("/")
-            url = f"/files/{relative_path}"
+            url = build_file_url(relative_path)
 
     if url.startswith("/files/") and not relative_path:
         relative_path = url[len("/files/"):].strip("/")
@@ -158,7 +158,7 @@ def normalize_agent_file(file_obj: Dict[str, Any]) -> Dict[str, Any] | None:
             pass
 
     if relative_path and not url:
-        url = f"/files/{relative_path}"
+        url = build_file_url(relative_path)
 
     if not name:
         if relative_path:

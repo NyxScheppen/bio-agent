@@ -3,10 +3,11 @@ import re
 import requests
 import xml.etree.ElementTree as ET
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
 from app.agent.tool_registry import register_tool
 from app.core.paths import GENERATED_DIR
+from app.utils.file_utils import build_file_url
 
 LITERATURE_DIR = Path(GENERATED_DIR) / "literature"
 LITERATURE_DIR.mkdir(parents=True, exist_ok=True)
@@ -14,6 +15,13 @@ LITERATURE_DIR.mkdir(parents=True, exist_ok=True)
 REQUEST_HEADERS = {
     "User-Agent": "BioAI-Agent/1.0 (iGEM literature tool)"
 }
+
+def _is_http_url(url: str) -> bool:
+    """校验 URL 是否为 http/https 协议，防止 SSRF（file://、非 http 重定向等）。"""
+    try:
+        return urlparse(url).scheme in ("http", "https")
+    except ValueError:
+        return False
 
 def _safe_get(url: str, params: dict = None, timeout: int = 20):
     resp = requests.get(url, params=params, timeout=timeout, headers=REQUEST_HEADERS)
@@ -585,6 +593,12 @@ def download_open_access_pdf(identifier_or_url: str, filename_hint: str = ""):
                 "message": "未找到可下载的开放获取 PDF 链接"
             }, ensure_ascii=False)
 
+        if not _is_http_url(pdf_url):
+            return json.dumps({
+                "status": "error",
+                "message": f"仅支持 http/https 下载链接，已拦截: {pdf_url}"
+            }, ensure_ascii=False)
+
         safe_name = re.sub(r"[^a-zA-Z0-9._-]+", "_", filename_hint.strip()) if filename_hint else ""
         if not safe_name:
             safe_name = re.sub(r"[^a-zA-Z0-9._-]+", "_", identifier_or_url)[:80]
@@ -596,6 +610,12 @@ def download_open_access_pdf(identifier_or_url: str, filename_hint: str = ""):
 
         resp = requests.get(pdf_url, timeout=30, headers=REQUEST_HEADERS)
         resp.raise_for_status()
+
+        if not _is_http_url(resp.url):
+            return json.dumps({
+                "status": "error",
+                "message": f"重定向到了非 http/https 地址，已拦截: {resp.url}"
+            }, ensure_ascii=False)
 
         content_type = resp.headers.get("Content-Type", "").lower()
         if "pdf" not in content_type and not pdf_url.lower().endswith(".pdf"):
@@ -610,7 +630,7 @@ def download_open_access_pdf(identifier_or_url: str, filename_hint: str = ""):
             f.write(resp.content)
 
         relative_path = f"generated/literature/{save_path.name}"
-        url = f"/files/{relative_path}"
+        url = build_file_url(relative_path)
 
         return json.dumps({
             "status": "success",

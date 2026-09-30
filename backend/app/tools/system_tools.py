@@ -70,11 +70,6 @@ def scan_system_config():
         "git_path": shutil.which("git"),
         "git_version": _get_command_version("git", "--version"),
         "cpu_count": os.cpu_count(),
-
-        "env_UPLOAD_DIR": os.environ.get("UPLOAD_DIR", ""),
-        "env_R_LIBS_USER": os.environ.get("R_LIBS_USER", ""),
-        "env_RSCRIPT_PATH": os.environ.get("RSCRIPT_PATH", ""),
-        "path_head": os.environ.get("PATH", "")[:1000],
     }
 
     return json.dumps(info, ensure_ascii=False, indent=2)

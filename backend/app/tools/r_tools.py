@@ -13,6 +13,7 @@ from app.core.runtime_paths import (
     find_rscript,
     build_r_subprocess_env,
 )
+from app.utils.file_utils import build_file_url
 
 MAX_R_OUTPUT_CHARS = 12000
 
@@ -67,7 +68,7 @@ def collect_output_files(job_dir: Path):
             continue
         try:
             rel_to_generated = p.relative_to(GENERATED_DIR).as_posix()
-            url = f"/files/generated/{rel_to_generated}"
+            url = build_file_url(f"generated/{rel_to_generated}")
         except Exception:
             url = ""
 
@@ -199,6 +200,41 @@ save_to_job <- function(filename) {{
 }}
 
 setwd(GENERATED_DIR)
+
+# ===== 安全加固：防 prompt 注入（本地工具加固暴露面）=====
+
+# 1) 遮蔽 shell 执行原语：分析脚本禁止直接调 system / shell / system2 / shell.exec
+system <- function(...) stop("安全限制：分析脚本禁止执行 shell 命令 (system)")
+shell <- function(...) stop("安全限制：分析脚本禁止执行 shell 命令 (shell)")
+system2 <- function(...) stop("安全限制：分析脚本禁止执行 shell 命令 (system2)")
+shell.exec <- function(...) stop("安全限制：分析脚本禁止执行 shell 命令 (shell.exec)")
+
+# 2) 限制 file() 只能访问 storage 内文件，阻断 readLines("/abs/.env") 这类越界读取
+.orig_file <- base::file
+.allow_roots <- unique(c(
+  Sys.getenv(c("STORAGE_DIR", "UPLOAD_DIR", "GENERATED_ROOT", "GENERATED_DIR", "R_LIBS_USER")),
+  .libPaths(),
+  tempdir(),
+  R.home()
+))
+.allow_roots <- .allow_roots[nzchar(.allow_roots)]
+.allow_roots <- normalizePath(.allow_roots, winslash = "/", mustWork = FALSE)
+
+.file_safe <- function(description = "", ...) {{
+  if (is.character(description) && length(description) == 1 && nzchar(description)
+      && !grepl("^[a-zA-Z][a-zA-Z0-9+.-]*://", description)) {{
+    p <- normalizePath(description, winslash = "/", mustWork = FALSE)
+    if (!any(startsWith(p, .allow_roots))) {{
+      stop("安全限制：禁止访问 storage 目录外的文件: ", description)
+    }}
+  }}
+  .orig_file(description, ...)
+}}
+
+.base_ns <- asNamespace("base")
+unlockBinding("file", .base_ns)
+assign("file", .file_safe, envir = .base_ns)
+lockBinding("file", .base_ns)
 '''
 
     full_r_code = r_prelude + "\n\n" + str(r_code or "")

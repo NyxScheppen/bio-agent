@@ -1,4 +1,5 @@
 from app.agent.tool_registry import register_tool
+from app.agent.tool_result import make_error_result
 from app.tools.r_tools import (
     run_r_analysis,
     r_character_vector,
@@ -6,6 +7,22 @@ from app.tools.r_tools import (
     validate_r_column_name,
 )
 from app.tools.r_preprocess_templates import build_feature_df_preprocess_r
+
+
+ML_METHODS = {
+    "logistic": "glm",
+    "rf": "rf",
+    "svm": "svmRadial",
+}
+
+
+def _unsupported_algorithms(values):
+    return sorted({
+        str(value).strip().lower()
+        for value in values
+        if str(value).strip().lower() not in ML_METHODS
+    })
+
 
 @register_tool(
     name="run_ml_classification_model",
@@ -43,13 +60,14 @@ def run_ml_classification_model(
     feature_preprocess: str = "auto",
     job_dir: str = None,
 ):
-    method_map = {
-        "logistic": "glm",
-        "rf": "rf",
-        "svm": "svmRadial"
-    }
-    algorithm = algorithm.lower() if algorithm.lower() in method_map else "rf"
-    caret_method = method_map[algorithm]
+    algorithm = str(algorithm or "").strip().lower()
+    if algorithm not in ML_METHODS:
+        message = (
+            f"不支持的机器学习算法: {algorithm or '<empty>'}。"
+            f"可选算法: {', '.join(ML_METHODS)}"
+        )
+        return make_error_result(message=message, errors=["unsupported_algorithm"])
+    caret_method = ML_METHODS[algorithm]
     family_line = 'family = "binomial",' if algorithm == "logistic" else ""
     file_path = r_escape_string_content(file_path)
     label_col = r_escape_string_content(validate_r_column_name(label_col))
@@ -62,12 +80,12 @@ library(caret)
 library(pROC)
 library(ggplot2)
 
-{preprocess_r}
-
 set.seed(123)
 df <- fread(smart_read("{file_path}"), data.table = FALSE)
 
 if (!("{label_col}" %in% colnames(df))) stop("找不到标签列")
+{preprocess_r}
+
 df <- df[complete.cases(df), ]
 if (nrow(df) < 20) stop("样本数太少，无法稳定建模")
 
@@ -184,10 +202,10 @@ def run_ml_feature_selection_lasso(
 library(data.table)
 library(glmnet)
 
-{preprocess_r}
-
 df <- fread(smart_read("{file_path}"), data.table = FALSE)
 if (!("{label_col}" %in% colnames(df))) stop("找不到标签列")
+{preprocess_r}
+
 df <- df[complete.cases(df), ]
 if (nrow(df) < 20) stop("样本数太少")
 
@@ -266,13 +284,21 @@ def run_multi_model_comparison(
     feature_preprocess: str = "auto",
     job_dir: str = None,
 ):
-    algorithms = algorithms or ["logistic", "rf", "svm"]
-    method_map = {
-        "logistic": "glm",
-        "rf": "rf",
-        "svm": "svmRadial"
-    }
-    algorithms = [str(item).lower() for item in algorithms if str(item).lower() in method_map]
+    if algorithms is None:
+        algorithms = ["logistic", "rf", "svm"]
+    if not isinstance(algorithms, (list, tuple)) or not algorithms:
+        return make_error_result(
+            message="algorithms 必须是非空数组。",
+            errors=["invalid_algorithms"],
+        )
+    unsupported = _unsupported_algorithms(algorithms)
+    if unsupported:
+        message = (
+            f"不支持的机器学习算法: {', '.join(unsupported)}。"
+            f"可选算法: {', '.join(ML_METHODS)}"
+        )
+        return make_error_result(message=message, errors=["unsupported_algorithm"])
+    algorithms = list(dict.fromkeys(str(item).strip().lower() for item in algorithms))
     algos_r = r_character_vector(algorithms)
     file_path = r_escape_string_content(file_path)
     label_col = r_escape_string_content(validate_r_column_name(label_col))
@@ -284,12 +310,12 @@ library(data.table)
 library(caret)
 library(pROC)
 
-{preprocess_r}
-
 set.seed(123)
 df <- fread(smart_read("{file_path}"), data.table = FALSE)
 
 if (!("{label_col}" %in% colnames(df))) stop("找不到标签列")
+{preprocess_r}
+
 df <- df[complete.cases(df), ]
 if (nrow(df) < 20) stop("样本数太少")
 

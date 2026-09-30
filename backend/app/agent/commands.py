@@ -11,6 +11,14 @@
 
 from typing import Any, Dict, Optional
 
+
+STATUS_LABELS = {
+    "implemented": "已实现",
+    "partial": "部分实现",
+    "planned": "规划中",
+    "unavailable": "不可用",
+}
+
 COMMANDS: Dict[str, Dict[str, Any]] = {
     "/survival": {
         "skill": "single_gene_survival",
@@ -65,7 +73,7 @@ COMMANDS: Dict[str, Dict[str, Any]] = {
     "/compare": {
         "skill": "multi_model_comparison",
         "description": "多模型比较",
-        "example": "/compare 比较 RF/SVM/XGBoost",
+        "example": "/compare 比较 Logistic/RF/SVM",
     },
     "/ppi": {
         "skill": "ppi_network_analysis",
@@ -79,8 +87,18 @@ COMMANDS: Dict[str, Dict[str, Any]] = {
     },
     "/scrna": {
         "skill": "scrna_standard_pipeline",
-        "description": "单细胞标准流程",
-        "example": "/scrna 分析 10x 数据",
+        "description": "单个 10X 数据集的 Seurat 标准流程",
+        "example": "/scrna 分析已上传的 filtered_feature_bc_matrix.h5",
+    },
+    "/spatial": {
+        "skill": "spatial_clustering",
+        "description": "Visium 表达聚类与组织切片投影",
+        "example": "/spatial 分析已上传的 Space Ranger ZIP",
+    },
+    "/perturb": {
+        "skill": "perturbation_response",
+        "description": "真实对照组与扰动组的差异响应分析",
+        "example": "/perturb 比较 control 与 knockdown 样本",
     },
     "/probe": {
         "skill": "file_probe",
@@ -89,8 +107,8 @@ COMMANDS: Dict[str, Dict[str, Any]] = {
     },
     "/geo": {
         "skill": "geo_data_download",
-        "description": "GEO 数据下载",
-        "example": "/geo GSE84402",
+        "description": "已上传 GEO 文件导入与预览",
+        "example": "/geo 解析已上传的 series_matrix 文件",
     },
     "/lit": {
         "task_type": "literature",
@@ -110,6 +128,36 @@ COMMANDS: Dict[str, Dict[str, Any]] = {
         "example": "/help",
     },
 }
+
+
+def command_implementation_status(info: Dict[str, Any]) -> str:
+    """Resolve command availability from its backing Skill."""
+    skill_id = str(info.get("skill", ""))
+    if not skill_id:
+        return "implemented"
+
+    from app.agent.skills.skill_registry import get_skill
+
+    skill = get_skill(skill_id)
+    if skill is None:
+        try:
+            from app.agent.skills.builtin_skills import register_all_builtin_skills
+
+            register_all_builtin_skills()
+        except (OSError, ValueError):
+            return "unavailable"
+        skill = get_skill(skill_id)
+    if skill is None:
+        return "unavailable"
+    return str(skill.implementation_status or "planned")
+
+
+def planned_command_message(command: str, info: Dict[str, Any]) -> str:
+    description = str(info.get("description", "该能力"))
+    return (
+        f"`{command}` 对应的“{description}”目前仍处于规划阶段，"
+        "尚未开放分析工具执行。可使用 `/help` 查看已实现和部分实现的命令。"
+    )
 
 
 def resolve_command(user_message: str) -> Optional[Dict[str, Any]]:
@@ -140,18 +188,25 @@ def resolve_command(user_message: str) -> Optional[Dict[str, Any]]:
 
     result = dict(cmd_info)
     result["original_text"] = text
+    result["command"] = command
+    status = command_implementation_status(cmd_info)
+    result["implementation_status"] = status
+    if status == "planned":
+        result["availability_message"] = planned_command_message(command, cmd_info)
+    elif status == "unavailable":
+        result["availability_message"] = (
+            f"`{command}` 的后端 Skill 未注册，当前不可执行。"
+        )
 
     # 如果有剩余文本，作为用户意图追加
     if rest:
         result["user_intent"] = rest
-        result["command"] = command
 
     return result
 
 
 def build_help_response() -> Dict[str, Any]:
     """构建 /help 命令的响应。"""
-    lines = ["可用命令：", ""]
     by_category: Dict[str, list] = {}
 
     for cmd, info in sorted(COMMANDS.items()):
@@ -168,7 +223,9 @@ def build_help_response() -> Dict[str, Any]:
     for cat, cmds in sorted(by_category.items()):
         help_text += f"\n**{cat}**\n"
         for cmd, info in cmds:
-            help_text += f"- `{cmd}` — {info['description']}\n"
+            status = command_implementation_status(info)
+            label = STATUS_LABELS.get(status, status)
+            help_text += f"- `{cmd}` [{label}] — {info['description']}\n"
 
     return {
         "task_type": "general",

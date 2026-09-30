@@ -1,5 +1,6 @@
 cran_repo <- "https://cloud.r-project.org"
 options(repos = c(CRAN = cran_repo))
+options(timeout = max(300, getOption("timeout", 60)))
 
 get_script_path <- function() {
   args_all <- commandArgs(trailingOnly = FALSE)
@@ -13,7 +14,7 @@ get_script_path <- function() {
 script_path <- get_script_path()
 
 if (!is.null(script_path)) {
-  project_root <- normalizePath(file.path(dirname(script_path), ".."), winslash = "/", mustWork = TRUE)
+  project_root <- normalizePath(dirname(script_path), winslash = "/", mustWork = TRUE)
 } else {
   cat("WARN: Cannot determine script path from --file. Falling back to current working directory.\n")
   project_root <- normalizePath(getwd(), winslash = "/", mustWork = TRUE)
@@ -23,7 +24,11 @@ lib_dir <- file.path(project_root, "env", "r_libs")
 dir.create(lib_dir, recursive = TRUE, showWarnings = FALSE)
 lib_dir <- normalizePath(lib_dir, winslash = "/", mustWork = TRUE)
 
-.libPaths(c(lib_dir, .libPaths()))
+# Keep the portable environment reproducible: user-level libraries must not
+# satisfy project dependencies that will be absent on another machine.
+system_libs <- unique(c(.Library.site, .Library))
+system_libs <- system_libs[nzchar(system_libs)]
+.libPaths(unique(c(lib_dir, system_libs)))
 
 cat("==> Project root:\n")
 cat(project_root, "\n\n")
@@ -38,6 +43,7 @@ phase1_cran <- c(
   "pheatmap",
   "survival",
   "glmnet",
+  "locfit",
   "timeROC",
   "pROC",
   "caret",
@@ -66,12 +72,47 @@ phase3_bioc <- c(
 )
 
 phase4_cran <- c(
+  "sp",
   "SeuratObject",
-  "Seurat"
+  "Seurat",
+  "sctransform",
+  "hdf5r"
 )
 
+required_dependencies <- function(pkg, lib.loc = NULL) {
+  desc <- tryCatch(
+    packageDescription(pkg, lib.loc = lib.loc),
+    error = function(e) NULL,
+    warning = function(w) NULL
+  )
+  if (is.null(desc)) return(character())
+
+  fields <- unlist(desc[c("Depends", "Imports", "LinkingTo")], use.names = FALSE)
+  fields <- fields[!is.na(fields) & nzchar(fields)]
+  if (length(fields) == 0) return(character())
+
+  entries <- trimws(unlist(strsplit(fields, ",", fixed = TRUE)))
+  names <- trimws(sub("\\s*\\(.*$", "", entries))
+  unique(setdiff(names[nzchar(names)], "R"))
+}
+
+dependency_tree_available <- function(pkg, lib.loc = NULL, seen = character()) {
+  if (pkg %in% seen) return(TRUE)
+  if (!requireNamespace(pkg, quietly = TRUE, lib.loc = lib.loc)) return(FALSE)
+
+  deps <- required_dependencies(pkg, lib.loc = lib.loc)
+  if (length(deps) == 0) return(TRUE)
+
+  next_seen <- c(seen, pkg)
+  all(vapply(
+    deps,
+    function(dep) dependency_tree_available(dep, seen = next_seen),
+    logical(1)
+  ))
+}
+
 is_installed <- function(pkg) {
-  requireNamespace(pkg, quietly = TRUE, lib.loc = lib_dir)
+  dependency_tree_available(pkg, lib.loc = lib_dir)
 }
 
 remove_lock_dirs <- function() {
@@ -124,7 +165,7 @@ install_one_cran <- function(pkg) {
     install.packages(
       pkg,
       lib = lib_dir,
-      dependencies = TRUE,
+      dependencies = NA,
       repos = cran_repo
     ),
     error = function(e) {

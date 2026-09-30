@@ -216,7 +216,10 @@ class SubAgentManager:
                     tool_name=task.tool,
                     func=func,
                     function_args=dict(task.args),
-                    session_id=f"{session_id}_sub_{task_index}" if session_id else "",
+                    # Jobs already have unique IDs. Preserve the real session so
+                    # delegated tools can read that session's uploads and their
+                    # outputs remain owned by the same lifecycle.
+                    session_id=session_id,
                     timeout_override=task.timeout,
                 )
                 status = result_status(result) or "success"

@@ -119,6 +119,16 @@ def _resolve_job_dir(job_dir: str | None, job_subdir: str | None) -> tuple[str, 
     return job_id, resolved
 
 
+def prepare_r_job_dir(job_dir: str | None = None, job_subdir: str | None = None) -> Path:
+    """Return a validated generated-directory path before an R job starts.
+
+    Most tools let ``run_r_analysis`` create the directory. Archive-backed tools
+    need the lifecycle-owned directory earlier so they can stage validated input
+    without extracting into uploads or a process-wide temporary directory.
+    """
+    return _resolve_job_dir(job_dir, job_subdir)[1]
+
+
 def _session_id_from_job_dir(job_dir: Path) -> str:
     """Infer lifecycle ownership from generated/{session_id}/{job_id}."""
     try:
@@ -138,6 +148,11 @@ def collect_output_files(job_dir: Path):
 
     for p in job_dir.rglob("*"):
         if not p.is_file() or p.name == "analysis.R" or p.name.startswith("."):
+            continue
+        try:
+            if any(part.startswith(".omics-input-") for part in p.relative_to(job_dir).parts):
+                continue
+        except ValueError:
             continue
         try:
             rel_to_generated = p.relative_to(GENERATED_DIR).as_posix()

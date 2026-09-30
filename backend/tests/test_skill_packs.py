@@ -119,7 +119,7 @@ def test_select_implemented_skill_priority():
     )
     _assert(skill is not None, "Should match a skill for scRNA")
     _assert_equal(skill.skill_id, "scrna_standard_pipeline")
-    _assert_equal(skill.implementation_status, "planned")
+    _assert_equal(skill.implementation_status, "implemented")
 
     # 差异分析（已实现）应该有更高分
     router_deg = {

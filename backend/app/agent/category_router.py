@@ -99,6 +99,17 @@ TOOL_CATEGORY_KEYWORDS = {
         "aptamer",
         "适配体",
     ],
+    "perturbation": [
+        "perturbation", "expression_scaling", "observed_response",
+        "knockdown", "knockout", "扰动", "敲低", "敲除",
+    ],
+    "scrna": [
+        "scrna", "single_cell", "single-cell", "seurat", "10x", "h5",
+        "单细胞", "聚类", "umap", "marker",
+    ],
+    "spatial": [
+        "spatial", "visium", "space ranger", "空间转录组", "空间表达",
+    ],
 }
 
 TEXT_CATEGORY_KEYWORDS = {
@@ -134,6 +145,17 @@ TEXT_CATEGORY_KEYWORDS = {
     ],
     "aptamer": [
         "适配体", "aptamer"
+    ],
+    "perturbation": [
+        "扰动", "敲低", "敲除", "knockdown", "knockout",
+        "perturbation", "处理组", "实验扰动", "表达缩放"
+    ],
+    "scrna": [
+        "单细胞", "scrna", "scrna-seq", "single cell", "single-cell",
+        "seurat", "10x", "umap", "marker"
+    ],
+    "spatial": [
+        "空间转录组", "空间表达", "visium", "space ranger", "spatial transcriptomics"
     ],
 }
 

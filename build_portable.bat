@@ -198,7 +198,7 @@ echo ---- Step 9: Generate VERSION...
     echo BioAI Agent Portable
     echo Build Date: %date% %time%
     echo Platform: Windows
-    echo Python: 3.10 / 3.11 / 3.12 (install on target machine^)
+    echo Python: 3.11 / 3.12 (install on target machine^)
     echo R: R 4.2+ (install on target machine^)
     echo.
     echo Included directories:

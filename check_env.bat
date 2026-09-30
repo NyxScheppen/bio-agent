@@ -60,24 +60,20 @@ echo.
 echo ==> Locating Python...
 set "SYS_PYTHON="
 
-where python >nul 2>nul
-if not errorlevel 1 (
-    set "SYS_PYTHON=python"
-)
+py -3.12 -c "import sys; raise SystemExit(0 if sys.version_info[:2] == (3, 12) else 1)" >nul 2>nul
+if not errorlevel 1 set "SYS_PYTHON=py -3.12"
 
 if not defined SYS_PYTHON (
-    py -3.12 --version >nul 2>nul
-    if not errorlevel 1 set "SYS_PYTHON=py -3.12"
-)
-
-if not defined SYS_PYTHON (
-    py -3.11 --version >nul 2>nul
+    py -3.11 -c "import sys; raise SystemExit(0 if sys.version_info[:2] == (3, 11) else 1)" >nul 2>nul
     if not errorlevel 1 set "SYS_PYTHON=py -3.11"
 )
 
 if not defined SYS_PYTHON (
-    py -3.10 --version >nul 2>nul
-    if not errorlevel 1 set "SYS_PYTHON=py -3.10"
+    where python >nul 2>nul
+    if not errorlevel 1 (
+        python -c "import sys; raise SystemExit(0 if (3, 11) ^<= sys.version_info[:2] ^< (3, 13) else 1)" >nul 2>nul
+        if not errorlevel 1 set "SYS_PYTHON=python"
+    )
 )
 
 if defined SYS_PYTHON (
@@ -85,7 +81,7 @@ if defined SYS_PYTHON (
     %SYS_PYTHON% --version
 ) else (
     echo [FAIL] Python not found.
-    echo [INFO] Please install Python 3.10/3.11/3.12 and add it to PATH.
+    echo [INFO] Please install Python 3.11 or 3.12 and add it to PATH.
     set "HAS_ERROR=1"
 )
 echo.

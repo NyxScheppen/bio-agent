@@ -1,18 +1,18 @@
 skills:
   - skill_id: spatial_clustering
-    name: "空间转录组聚类"
+    name: "Visium 表达聚类与空间投影"
     category: spatial
-    description: "对空间转录组数据进行空间感知聚类分析"
+    description: "对单个 10X Visium 数据集执行 QC、SCTransform 和表达聚类，并投影到组织切片；不是空间感知聚类"
     task_types: [bioinformatics]
     subtask_types: [spatial_analysis, spatial_clustering]
     trigger_keywords: [spatial transcriptomics, Visium, spatial clustering]
     trigger_keywords_cn: [空间转录组, 空间聚类, Visium, 空间分析]
-    required_inputs: [expression_file, spatial_coords_file]
-    optional_inputs: [tissue_image]
-    allowed_tools: []
+    required_inputs: [visium_zip_file]
+    optional_inputs: [feature_genes]
+    allowed_tools: [run_visium_standard_pipeline]
     tool_categories: [spatial]
     max_tool_rounds: 14
-    safety_rules: ["空间聚类依赖坐标精度"]
+    safety_rules: ["每次只接受一个完整 Space Ranger ZIP", "当前聚类仅基于表达并投影到空间，不是空间感知聚类", "不包含空间反卷积"]
     report_sections:
       - section_id: spatial_map
         title: "空间分布图"
@@ -22,8 +22,8 @@ skills:
         title: "空间区域 marker"
         content_hint: "各空间区域的 marker 基因"
         order: 2
-    output_expectations: [spatial_cluster_plot.png, spatial_markers.csv, spatial_feature_plot.png]
-    implementation_status: planned
+    output_expectations: [visium_expression_clusters_spatial.png, visium_top_markers.csv, visium_qc_metrics.csv, visium_standard_seurat.rds]
+    implementation_status: implemented
     priority: high
     version: "1.0"
 

@@ -430,6 +430,7 @@ def build_compact_tool_summary(tool_result: Any) -> str:
         "columns_truncated",
         "preview_rows",
         "preview",
+        "summary",
         "output_files",
         "output_images",
         "output_pdfs",

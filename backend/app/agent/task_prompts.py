@@ -196,29 +196,31 @@ CATEGORY_PROMPTS = {
 """,
 
     "perturbation": """
-【虚拟敲低/扰动规则】
-1. 虚拟敲低是计算模拟，不等同于真实实验敲除。
-2. 必须确认表达矩阵包含 gene 列。
-3. 必须确认目标基因存在。
-4. knockdown_ratio 应限制在 0-1。
-5. 输出应说明扰动前后变化和生成文件。
+【表达缩放/扰动响应规则】
+1. run_expression_scaling_scenario 只缩放目标基因一行，不预测下游响应，不得称为敲除预测。
+2. 真实扰动响应必须使用实际 control/perturbed 样本及元数据，并调用 run_observed_perturbation_response_analysis。
+3. 表达矩阵必须含 gene 列；真实响应元数据必须含样本列和条件列且样本名匹配。
+4. raw count 使用 DESeq2；连续表达使用 limma，并明确预处理尺度。
+5. 结果是组间观测关联，不自动证明目标扰动导致了全部差异。
+6. 当前不提供 GEARS/scGen、LINCS 下载或 CRISPR 筛选预测模型。
 """,
 
     "scrna": """
 【单细胞分析规则】
-1. 分析前必须确认输入格式：Seurat RDS、h5ad、10x matrix、CSV/TSV 等。
-2. 聚类、降维、marker 分析必须基于实际工具输出。
-3. 不要凭空命名细胞类型。
-4. 细胞类型注释应基于 marker genes，并说明不确定性。
-5. 虚拟敲除是计算模拟，不等同于真实实验。
+1. 当前原子标准流程只接受单个 10X H5，或只含一个完整 10X matrix/H5 数据集的 ZIP。
+2. 当前不接受 h5ad、任意 CSV/TSV 计数矩阵、任意上传 RDS 或多样本整合输入。
+3. QC 必须应用并报告 min_features、max_features、max_mt_percent 的过滤结果。
+4. 聚类、UMAP 和 marker 必须来自 run_scrna_standard_pipeline 的真实输出。
+5. 当前不实现细胞类型注释、拟时序或细胞通讯；不要凭空命名细胞类型。
 """,
 
     "spatial": """
 【空间转录组规则】
-1. 必须确认空间坐标信息和表达矩阵。
-2. 如果缺少坐标或组织图像，应说明限制。
-3. 空间聚类、空间 marker、空间通讯必须基于工具输出。
-4. 不要编造空间区域或组织结构。
+1. 当前原子流程只接受单个完整 10X Visium Space Ranger 输出 ZIP。
+2. ZIP 必须同时包含 filtered_feature_bc_matrix.h5、spatial 坐标、缩放因子和组织图像。
+3. run_visium_standard_pipeline 做的是表达聚类并投影到组织切片，不是空间感知聚类。
+4. 当前不实现空间反卷积、空间通讯或多切片整合。
+5. 不要编造空间区域、组织结构或细胞组成。
 """,
 
     "modeling": """
@@ -285,6 +287,9 @@ ROUTER_PROMPT = """
 7. 用户提到文件读取、预览、格式、解包、压缩包、csv、tsv、xlsx、gz、zip，tool_categories 应包含 file_io。
 8. 如果用户最新输入是 “1”、“2”、“选1”、“第一个” 等短编号表达，应结合后端 Session Memory 理解用户意图。
 9. 不要编造用户没有提供的信息。
+10. 用户提到单细胞、scRNA、Seurat、10X、UMAP，tool_categories 应包含 scrna。
+11. 用户提到空间转录组、Visium、Space Ranger，tool_categories 应包含 spatial。
+12. 用户提到扰动、敲低、敲除、处理组响应，tool_categories 应包含 perturbation。
 """
 
 PLANNER_PROMPT = """
@@ -335,6 +340,8 @@ PLANNER_PROMPT = """
 11. step_dependencies 的键和值都是 step_id；parallel_groups 只声明允许并发的 step_id。
 12. 参数需要引用前一步产物时使用精确值 "$step_N"，并在 step_dependencies 中声明依赖 N。
 13. 存在两个或更多参数完整且互不依赖的步骤时，应把它们的 step_id 放入同一个 parallel_groups 项。
+14. 单细胞标准流程和 Visium 标准流程各自只调用对应的原子工具，不要拆成依赖临时 RDS 的多步计划。
+15. 表达缩放不得被描述成下游响应预测；真实扰动响应必须有表达矩阵、样本元数据、control 和 treatment 标签。
 """
 
 EXECUTOR_ROLE_PROMPT = """

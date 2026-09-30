@@ -302,6 +302,30 @@ def test_sub_agent_retry_and_runtime() -> None:
     _assert(result.runtime_seconds >= 0)
 
 
+def test_sub_agent_preserves_parent_session_id() -> None:
+    import app.agent.sub_agent_manager as module
+
+    received = []
+    module.TOOL_REGISTRY["session_tool"] = lambda: None
+
+    def fake_runner(**kwargs: Any) -> Any:
+        received.append(kwargs.get("session_id"))
+        return make_success_result("ok")
+
+    restore = _patched(module, "run_tool_with_lifecycle", fake_runner)
+    try:
+        result = SubAgentManager().spawn_and_collect_all(
+            [SubAgentTask(goal="session", tool="session_tool")],
+            session_id="real_session",
+        )[0]
+    finally:
+        restore()
+        module.TOOL_REGISTRY.pop("session_tool", None)
+
+    _assert_equal(received, ["real_session"])
+    _assert_equal(result.status, "success")
+
+
 def test_sub_agent_timeout_is_never_retried() -> None:
     import app.agent.sub_agent_manager as module
 

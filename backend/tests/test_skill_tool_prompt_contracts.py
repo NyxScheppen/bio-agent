@@ -1,6 +1,38 @@
 import pytest
 
 
+def test_safe_print_handles_legacy_console_encoding():
+    import io
+
+    from app.utils.console import safe_print
+
+    class GbkStream(io.StringIO):
+        @property
+        def encoding(self):
+            return "gbk"
+
+    stream = GbkStream()
+    safe_print("router 🧭 中文", file=stream)
+    output = stream.getvalue()
+    assert "router" in output
+    assert "中文" in output
+    assert "\\U0001f9ed" in output
+
+
+def test_system_scan_preserves_diagnostics_in_tool_summary():
+    from app.agent.agent_utils import build_compact_tool_summary
+    from app.tools.system_tools import scan_system_config
+
+    result = scan_system_config()
+    assert result.status == "success"
+    assert result.summary["python_version"]
+    assert "rscript_path" in result.summary
+    assert "r_libs_user" in result.summary
+    compact = build_compact_tool_summary(result)
+    assert "python_version" in compact
+    assert "rscript_path" in compact
+
+
 def test_duplicate_skill_registration_fails_closed():
     from app.agent.skills.skill_models import SkillSpec
     from app.agent.skills.skill_registry import (

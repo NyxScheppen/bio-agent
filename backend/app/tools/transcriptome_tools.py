@@ -207,7 +207,11 @@ p <- ggplot(plot_df, aes(x = log2FoldChange, y = -log10(padj), color = significa
 
 ggsave("deseq2_volcano.png", p, width = 8, height = 6, dpi = 150)
 
-vsd <- vst(dds, blind = TRUE)
+vsd <- if (nrow(dds) < 1000) {{
+  varianceStabilizingTransformation(dds, blind = TRUE)
+}} else {{
+  vst(dds, blind = TRUE)
+}}
 top_genes <- head(rownames(res[order(res$padj), ]), 30)
 top_genes <- top_genes[!is.na(top_genes)]
 

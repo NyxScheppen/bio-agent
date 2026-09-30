@@ -56,29 +56,25 @@ echo.
 echo ==> Locating Python...
 set "SYS_PYTHON="
 
-where python >nul 2>nul
-if not errorlevel 1 (
-    set "SYS_PYTHON=python"
-)
+py -3.12 -c "import sys; raise SystemExit(0 if sys.version_info[:2] == (3, 12) else 1)" >nul 2>nul
+if not errorlevel 1 set "SYS_PYTHON=py -3.12"
 
 if not defined SYS_PYTHON (
-    py -3.12 --version >nul 2>nul
-    if not errorlevel 1 set "SYS_PYTHON=py -3.12"
-)
-
-if not defined SYS_PYTHON (
-    py -3.11 --version >nul 2>nul
+    py -3.11 -c "import sys; raise SystemExit(0 if sys.version_info[:2] == (3, 11) else 1)" >nul 2>nul
     if not errorlevel 1 set "SYS_PYTHON=py -3.11"
 )
 
 if not defined SYS_PYTHON (
-    py -3.10 --version >nul 2>nul
-    if not errorlevel 1 set "SYS_PYTHON=py -3.10"
+    where python >nul 2>nul
+    if not errorlevel 1 (
+        python -c "import sys; raise SystemExit(0 if (3, 11) ^<= sys.version_info[:2] ^< (3, 13) else 1)" >nul 2>nul
+        if not errorlevel 1 set "SYS_PYTHON=python"
+    )
 )
 
 if not defined SYS_PYTHON (
-    echo [ERROR] Python not found.
-    echo Please install Python 3.10/3.11/3.12 first and add it to PATH.
+    echo [ERROR] A supported Python interpreter was not found.
+    echo Please install Python 3.11 or 3.12 and add it to PATH.
     pause
     exit /b 1
 )
@@ -103,6 +99,14 @@ if not exist "%PYTHON_CMD%" (
 if not exist "%PYTHON_CMD%" (
     echo [ERROR] Virtual environment python still not found:
     echo         %PYTHON_CMD%
+    pause
+    exit /b 1
+)
+
+"%PYTHON_CMD%" -c "import sys; raise SystemExit(0 if (3, 11) ^<= sys.version_info[:2] ^< (3, 13) else 1)" >nul 2>nul
+if errorlevel 1 (
+    echo [ERROR] The existing .venv does not use Python 3.11 or 3.12.
+    echo [INFO] Remove %PROJECT_ROOT%\.venv and run this script again.
     pause
     exit /b 1
 )
@@ -203,12 +207,9 @@ set "R_LIBS_USER=%PROJECT_ROOT%\env\r_libs"
 
 for %%I in ("%RSCRIPT_CMD%") do set "R_BIN=%%~dpI"
 
-set "HOST=127.0.0.1"
-set "PORT=8000"
 set "RUN_BAT=%PROJECT_ROOT%\runtime\run_backend.bat"
 
-echo [INFO] HOST=%HOST%
-echo [INFO] PORT=%PORT%
+echo [INFO] API_HOST and API_PORT are loaded from backend\.env
 echo [INFO] R_LIBS_USER=%R_LIBS_USER%
 echo [INFO] RSCRIPT_CMD=%RSCRIPT_CMD%
 echo.
@@ -231,24 +232,18 @@ echo.
     echo echo GENERATED_DIR=%%GENERATED_DIR%%
     echo echo R_LIBS_USER=%%R_LIBS_USER%%
     echo echo RSCRIPT_PATH=%%RSCRIPT_PATH%%
-    echo "%PYTHON_CMD%" -m uvicorn app.main:app --host %HOST% --port %PORT% ^> "%PROJECT_ROOT%\logs\backend.log" 2^>^&1
+    echo "%PYTHON_CMD%" -m app.server --open-browser ^> "%PROJECT_ROOT%\logs\backend.log" 2^>^&1
 ) > "%RUN_BAT%"
 
 echo [INFO] Starting backend service...
 start "BioAI-Agent-Backend" "%RUN_BAT%"
 
-echo [INFO] Waiting for backend to start...
-timeout /t 6 /nobreak >nul
-
-echo [INFO] Opening browser...
-start http://%HOST%:%PORT%
-
 echo.
 echo ======================================
 echo  BioAI Agent start command issued
 echo ======================================
-echo URL: http://%HOST%:%PORT%
-echo Health: http://%HOST%:%PORT%/api/health
+echo URL and health endpoint use API_HOST/API_PORT from backend\.env.
+echo Wildcard listen addresses open in the browser as 127.0.0.1.
 echo Log: %PROJECT_ROOT%\logs\backend.log
 echo.
 echo If page is not available, check:

@@ -3,7 +3,7 @@
 > 面向生物信息学与合成生物学领域的 AI 智能助手  
 > 通过自然语言对话执行专业生信分析 —— 从数据上传到可视化全流程自动化
 
-**版本**: 2.0 &nbsp;|&nbsp; **最后更新**: 2026-06-27
+**版本**: 2.0 &nbsp;|&nbsp; **最后更新**: 2026-09-30
 
 ---
 
@@ -18,14 +18,14 @@ BioAI Agent 是一个全栈 AI 应用，将大语言模型与生物信息学工�
 ## ✨ 核心特性
 
 - **Multi-Agent 架构** — Router → Planner → Executor → Reporter 流水线，全自动任务编排
-- **54 个 Skill** — YAML 驱动的任务专精技能包，覆盖 16 个生信类别
-- **45+ 专业工具** — 生存分析、差异表达、富集分析、机器学习、单细胞、空间转录组等
+- **YAML Skill 系统** — 54 条定义（22 个已实现、3 个部分实现、29 个规划中），覆盖 15 个类别
+- **40 个注册工具** — 覆盖生存分析、差异表达、富集分析、机器学习、单细胞、空间转录组、扰动响应、文件处理与文献检索等
 - **R 深度集成** — 子进程调用 Rscript，私有包库管理，无缝衔接 Bioconductor 生态
-- **并行 + 竞速** — 依赖感知并行执行，Waterfall Racing 多工具竞速
+- **并行 + DEG 竞速** — 依赖感知并行执行，连续表达与 count 差异分析工具竞速
 - **护栏机制** — 空转检测、熔断器、自动恢复策略，防止失控
-- **斜杠命令** — 19 个快捷命令（`/survival` `/deg` `/enrich` `/gsea` 等）
+- **斜杠命令** — 21 个快捷命令（`/survival` `/deg` `/scrna` `/spatial` `/perturb` 等）
 - **Session Memory** — 跨轮次会话记忆，支持短回复解析
-- **自改进反馈** — 失败模式记录 → 分析 → 改进建议的闭环
+- **改进反馈** — 自动记录失败模式，支持人工触发分析并生成待审核建议；不会自动修改 Skill
 
 ---
 
@@ -33,12 +33,12 @@ BioAI Agent 是一个全栈 AI 应用，将大语言模型与生物信息学工�
 
 | 层级 | 技术 |
 |------|------|
-| 后端框架 | FastAPI 0.135+ (Python 3.10-3.12) |
+| 后端框架 | FastAPI 0.135+ (Python 3.11-3.12) |
 | ASGI 服务器 | Uvicorn |
 | AI / LLM | DeepSeek API（OpenAI 兼容接口） |
 | 数据库 | SQLite + SQLAlchemy 2.0 |
 | R 集成 | subprocess + Rscript (R 4.2+) |
-| 前端 | Vite + React SPA |
+| 前端 | 已打包的 Vite + React SPA（运行仓库包含静态构建产物） |
 | 数据处理 | Pandas, NumPy, Scikit-learn, SciPy |
 | 可视化 | Matplotlib, Seaborn (Python) + ggplot2 (R) |
 
@@ -48,9 +48,9 @@ BioAI Agent 是一个全栈 AI 应用，将大语言模型与生物信息学工�
 
 ### 环境要求
 
-- **Python** 3.10 / 3.11 / 3.12
+- **Python** 3.11 / 3.12
 - **R** 4.2 或更高版本
-- **操作系统** Windows 10/11（主平台），兼容 Linux
+- **操作系统** Windows 10/11（正式支持）；后端有部分 POSIX 兼容代码，但尚未提供 Linux 安装脚本和 CI 保证
 
 ### 安装和启动
 
@@ -69,9 +69,13 @@ copy backend\.env_example backend\.env
 start_app.bat
 ```
 
-应用将在 `http://127.0.0.1:8000` 启动，浏览器自动打开。
+应用默认在 `http://127.0.0.1:8000` 启动，浏览器自动打开。修改 `API_HOST` 或 `API_PORT` 后，启动脚本会使用新配置。
 
 > ⚠️ `start_app.bat` 将自动创建虚拟环境、安装 Python 依赖、定位 Rscript，无需手动配置。
+
+逐项能力验证结果、真实执行证据和外部服务阻断记录见
+[`docs/README_FEATURE_VERIFICATION.md`](docs/README_FEATURE_VERIFICATION.md)。外部数据库能力依赖
+KEGG、MSigDB/Zenodo、STRING、Europe PMC 等服务的实时可用性；外部端点失败不会被记录为分析成功。
 
 ### 手动配置环境变量
 
@@ -91,9 +95,9 @@ API_PORT=8000
 
 ```
 用户输入
-  → 命令解析 (19 个斜杠命令)
+  → 命令解析 (21 个斜杠命令)
   → Router Agent: 任务分类
-  → Skill Select: 匹配 54 个技能包
+  → Skill Select: 匹配 YAML Skill 定义并检查实现状态
   → Planner Agent: 制定执行计划
   → [Delegator]: 复杂任务拆分子 Agent
   → Executor Agent: 并行/竞速工具调用 + 护栏保护
@@ -101,38 +105,60 @@ API_PORT=8000
   → 返回 { reply, files }
 ```
 
-### 工具分类
+### 能力状态
 
-| 类别 | 代表功能 |
-|------|---------|
-| 🔬 生存分析 | KM 曲线、Cox 回归、LASSO 预后模型 |
-| 🧬 转录组 | DESeq2 / limma 差异表达、PCA |
-| 🧪 富集分析 | GO / KEGG / GSEA / GSVA |
-| 🤖 机器学习 | 随机森林、SVM、XGBoost、LASSO 特征选择 |
-| 🕸 网络药理学 | PPI 网络、STRING 数据库分析 |
-| 🔬 单细胞 | Seurat 标准流程 |
-| 🗺 空间转录组 | 空间基因表达分析 |
-| 🧲 虚拟扰动 | 基因 knock down / knock out 模拟 |
-| 📚 文献检索 | PubMed 文献检索 |
-| 🧬 单基因 | 表达分析、基因集相关性 |
-| 📂 文件操作 | 多格式预览、GEO 数据下载 |
-| 🔧 系统 | R/Python 环境诊断 |
+| 类别 | 代表功能 | 状态 |
+|------|---------|------|
+| 🔬 生存分析 | KM 曲线、Cox 回归、LASSO 预后模型 | 已实现 |
+| 🧬 转录组 | DESeq2 / limma 差异表达、PCA | 已实现 |
+| 🧪 富集分析 | GO / KEGG / GSEA | 已实现 |
+| 🤖 机器学习 | Logistic、随机森林、SVM、LASSO 特征选择 | 已实现 |
+| 🕸 网络药理学 | PPI 网络、STRING 数据库分析 | 已实现/部分实现 |
+| 📚 文献检索 | PubMed 文献检索与开放获取 PDF | 已实现 |
+| 🧬 单基因 | 表达、相关性、ROC 分析 | 已实现 |
+| 📂 文件操作 | 多格式预览、已上传 GEO 文件导入 | 已实现/部分实现 |
+| 🔧 系统 | R/Python 环境诊断 | 已实现 |
+| 🔬 单细胞 | 单个 10X H5/ZIP 的 Seurat QC、标准化、PCA、聚类、UMAP、marker | 已实现 |
+| 🗺 空间转录组 | 单个 Visium ZIP 的 QC、SCTransform、表达聚类和组织切片投影 | 已实现 |
+| 🧲 扰动分析 | 目标基因表达缩放情景；真实对照/扰动样本的 DESeq2 或 limma 响应分析 | 已实现/部分实现 |
+
+“规划中”的 Skill 会在进入 Planner/Executor 前停止，不会把底层函数误报为完整可用流程。
+
+### 单细胞、空间与扰动的边界
+
+- 单细胞标准流程接受当前会话上传的单个 10X `filtered_feature_bc_matrix.h5`，或只含一个完整 10X matrix/H5 数据集的 ZIP。当前不支持 h5ad、任意 CSV/TSV 计数矩阵、任意上传 RDS、多样本整合、细胞注释、拟时序或细胞通讯。
+- Visium 标准流程接受只含一个完整 Space Ranger 输出的 ZIP，要求有 `filtered_feature_bc_matrix.h5`、空间坐标、`scalefactors_json.json` 和组织图像。输出是表达聚类在组织切片上的投影，不是空间感知聚类，也不包含反卷积。
+- 表达缩放情景只把目标基因一行乘以 `1 - scaling_ratio`，不推断下游基因或通路，不能作为真实敲低/敲除预测。
+- 真实扰动响应分析要求用户提供实际 control/perturbed 样本的表达矩阵和元数据；raw count 使用 DESeq2，连续表达使用 limma。结果是组间观测关联，不自动证明因果。
+- GEARS、scGen、LINCS 自动下载、CRISPR 筛选建模等预测型虚拟扰动仍为规划能力。
 
 ---
 
 ## ⌨ 斜杠命令
 
-| 命令 | 功能 | 命令 | 功能 |
-|------|------|------|------|
-| `/survival` | 单基因生存分析 | `/cox` | 批量 Cox 回归 |
-| `/lasso` | LASSO-Cox 模型 | `/deg` | 差异表达 (limma) |
-| `/deseq2` | DESeq2 差异分析 | `/pca` | PCA 分析 |
-| `/enrich` | GO/KEGG 富集 | `/gsea` | GSEA 预排序 |
-| `/ml` | ML 二分类 | `/compare` | 多模型比较 |
-| `/ppi` | PPI 网络 | `/netpharm` | 网络药理学 |
-| `/scrna` | 单细胞分析 | `/probe` | 文件探测 |
-| `/geo` | GEO 下载 | `/lit` | 文献检索 |
-| `/env` | 环境检测 | `/help` | 命令帮助 |
+| 命令 | 功能 | 状态 |
+|------|------|------|
+| `/survival` | 单基因生存分析 | 已实现 |
+| `/cox` | 批量 Cox 回归 | 已实现 |
+| `/lasso` | LASSO-Cox 模型 | 已实现 |
+| `/risk` | 预后风险评分模型 | 已实现 |
+| `/deg` | 差异表达（limma） | 已实现 |
+| `/deseq2` | DESeq2 差异分析 | 已实现 |
+| `/pca` | PCA 分析 | 已实现 |
+| `/enrich` | GO/KEGG 富集 | 已实现 |
+| `/gsea` | GSEA 预排序 | 已实现 |
+| `/ml` | ML 二分类 | 已实现 |
+| `/compare` | Logistic/RF/SVM 比较 | 已实现 |
+| `/ppi` | PPI 网络 | 已实现 |
+| `/netpharm` | 网络药理学 | 已实现 |
+| `/probe` | 文件探测 | 已实现 |
+| `/geo` | 已上传 GEO 文件导入与预览 | 部分实现 |
+| `/lit` | 文献检索 | 已实现 |
+| `/env` | 环境检测 | 已实现 |
+| `/scrna` | 单个 10X 数据集的 Seurat 标准流程 | 已实现 |
+| `/spatial` | Visium 表达聚类与组织切片投影 | 已实现 |
+| `/perturb` | 真实对照组与扰动组的差异响应分析 | 已实现 |
+| `/help` | 显示命令及实时实现状态 | 已实现 |
 
 ---
 
@@ -156,8 +182,8 @@ bio_test/
 │       ├── main.py            # FastAPI 入口
 │       ├── api/               # REST API（chat / upload / history / system）
 │       ├── agent/             # Multi-Agent + Skill + Rules + Hooks
-│       │   └── skills/packs/  # 18 个 YAML Skill 定义
-│       ├── tools/             # 45+ 生信分析工具
+│       │   └── skills/packs/  # 16 个 YAML 包、54 条 Skill 定义
+│       ├── tools/             # 40 个已注册分析/系统工具
 │       ├── services/          # 业务服务层
 │       ├── db/                # ORM + CRUD + 审计日志
 │       ├── schemas/           # Pydantic 模型
@@ -178,7 +204,7 @@ bio_test/
 
 ```python
 from app.agent.tool_registry import register_tool
-from app.agent.tool_result import make_success_result
+from app.agent.tool_result import make_error_result, make_success_result
 
 @register_tool(
     name="my_analysis",
@@ -217,6 +243,9 @@ skills:
 ### 运行测试
 
 ```bash
+# 首次安装开发测试依赖
+.venv/Scripts/python.exe -m pip install -r requirements-dev.txt
+
 # 工具返回协议测试
 .venv/Scripts/python.exe backend/tests/test_tool_result.py
 
@@ -230,8 +259,11 @@ skills:
 .venv/Scripts/python.exe backend/tests/test_skill_system.py
 .venv/Scripts/python.exe backend/tests/test_skill_packs.py
 
-# 全量回归测试
+# ToolResult 快速冒烟测试
 .venv/Scripts/python.exe backend/tests/test_integration.py
+
+# 全量回归测试
+.venv/Scripts/python.exe -m pytest -q backend/tests
 ```
 
 ---

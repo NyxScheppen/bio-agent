@@ -28,6 +28,7 @@ from app.agent.skills.skill_router import select_skill
 from app.agent.skills.builtin_skills import register_all_builtin_skills
 from app.agent.skills.tool_policy import allowed_tool_names_for_skill
 from app.agent.tool_registry import TOOL_REGISTRY
+from app.utils.console import safe_print
 
 # 触发 tools 下所有模块的工具注册
 from app import tools  # noqa
@@ -215,7 +216,19 @@ def _run_bio_agent_sync(
     )
 
     router_result = run_router_agent(context_pack)
-    print(f"\n🧭 [Router] {json.dumps(router_result, ensure_ascii=False, default=str)}")
+    safe_print(f"\n[Router] {json.dumps(router_result, ensure_ascii=False, default=str)}")
+
+    direct_response = str(router_result.get("direct_response", "")).strip()
+    if direct_response:
+        final_answer = sanitize_final_answer(direct_response)
+        remember_agent_turn(
+            session_id=session_id,
+            final_answer=final_answer,
+            router_result=router_result,
+            planner_result={},
+            executor_result={},
+        )
+        return _make_agent_result(final_answer, files=[])
 
     # Phase 3+: Skill 选择（在 Router 之后、Planner 之前）
     selected_skill: Optional[SkillSpec] = select_skill(
@@ -224,12 +237,26 @@ def _run_bio_agent_sync(
         available_files=_available_files_from_context(context_pack),
     )
     if selected_skill:
-        print(f"\n🎯 [Skill] {selected_skill.skill_id} — {selected_skill.name}")
+        safe_print(f"\n[Skill] {selected_skill.skill_id} - {selected_skill.name}")
     else:
-        print("\n🎯 [Skill] No skill matched, using free-planning fallback")
+        safe_print("\n[Skill] No skill matched, using free-planning fallback")
+
+    if selected_skill and selected_skill.implementation_status == "planned":
+        final_answer = sanitize_final_answer(
+            f"“{selected_skill.name}”目前仍处于规划阶段，尚未开放分析工具执行。"
+            "请使用 `/help` 查看已实现和部分实现的能力。"
+        )
+        remember_agent_turn(
+            session_id=session_id,
+            final_answer=final_answer,
+            router_result=router_result,
+            planner_result={},
+            executor_result={},
+        )
+        return _make_agent_result(final_answer, files=[])
 
     planner_result = run_planner_agent(context_pack, router_result, selected_skill=selected_skill)
-    print(f"\n📝 [Planner] {json.dumps(planner_result, ensure_ascii=False, default=str)}")
+    safe_print(f"\n[Planner] {json.dumps(planner_result, ensure_ascii=False, default=str)}")
 
     # ---- Phase 3.2: Delegator Agent (复杂任务委派检查) ----
     if FEATURE_FLAGS.get("sub_agent_delegation", False):
@@ -241,7 +268,7 @@ def _run_bio_agent_sync(
                 planner_result,
                 selected_skill=selected_skill,
             )
-            print(f"\n🔀 [Delegator] {json.dumps(delegator_result, ensure_ascii=False, default=str)}")
+            safe_print(f"\n[Delegator] {json.dumps(delegator_result, ensure_ascii=False, default=str)}")
             if delegator_result.get("should_delegate"):
                 planner_result["delegate_to_sub_agents"] = True
                 planner_result["sub_tasks"] = delegator_result.get("sub_tasks", [])
@@ -338,8 +365,8 @@ def _run_bio_agent_sync(
             selected_skill=selected_skill,
         )
 
-    print(
-        f"\n⚙️ [Executor Summary] "
+    safe_print(
+        f"\n[Executor Summary] "
         f"{json.dumps(executor_result, ensure_ascii=False, default=str)[:1500]}"
     )
 
@@ -356,8 +383,8 @@ def _run_bio_agent_sync(
     output_files = executor_result.get("output_files", []) or []
     output_files = _dedupe_files(output_files)
 
-    print(
-        "\n📦 [BioAgent Output Files] "
+    safe_print(
+        "\n[BioAgent Output Files] "
         + json.dumps(output_files, ensure_ascii=False, default=str)[:2000]
     )
 

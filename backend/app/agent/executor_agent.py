@@ -25,6 +25,7 @@ from app.agent.agent_utils import (
     is_error_result,
     to_plain_dict,
 )
+from app.utils.console import safe_print
 
 
 DEFAULT_MAX_TOOL_ROUNDS = 8
@@ -394,8 +395,8 @@ def run_executor_agent(
             "output_files": [],
         }
 
-    print(
-        "\n🧰 [Executor Tools] "
+    safe_print(
+        "\n[Executor Tools] "
         + json.dumps(
             [
                 {
@@ -408,7 +409,7 @@ def run_executor_agent(
         )
     )
     if selected_skill:
-        print(f"🎯 [Executor] Skill: {selected_skill.skill_id}, allowed_tools={selected_skill.allowed_tools}")
+        safe_print(f"[Executor] Skill: {selected_skill.skill_id}, allowed_tools={selected_skill.allowed_tools}")
 
     tool_observations = []
     all_output_files = []
@@ -422,7 +423,7 @@ def run_executor_agent(
     if FEATURE_FLAGS.get("parallel_execution", False) and (
         parallel_groups or step_dependencies
     ):
-        print(f"\n⚡ [Executor] Parallel mode: {len(parallel_groups)} groups detected")
+        safe_print(f"\n[Executor] Parallel mode: {len(parallel_groups)} groups detected")
         return _run_parallel_execution(
             planner_result=planner_result,
             parallel_groups=parallel_groups,
@@ -435,7 +436,7 @@ def run_executor_agent(
         )
 
     max_rounds = get_effective_max_tool_rounds(router_result, planner_result)
-    print(f"🧮 [Executor] effective_max_tool_rounds={max_rounds}")
+    safe_print(f"[Executor] effective_max_tool_rounds={max_rounds}")
 
     fatal_stop = False
 
@@ -445,7 +446,7 @@ def run_executor_agent(
     consecutive_errors = 0
 
     for round_idx in range(max_rounds):
-        print(f"\n🔁 [Executor] round={round_idx + 1}/{max_rounds}")
+        safe_print(f"\n[Executor] round={round_idx + 1}/{max_rounds}")
 
         response = client.chat.completions.create(
             model=MODEL_NAME,
@@ -491,7 +492,7 @@ def run_executor_agent(
             fingerprint = _make_call_fingerprint(function_name, function_args)
             _call_fingerprints[fingerprint] = _call_fingerprints.get(fingerprint, 0) + 1
             if _call_fingerprints[fingerprint] >= MAX_IDEMPOTENT_CALLS:
-                print(f"🛑 [Executor] Idempotent no-progress: {function_name} x{_call_fingerprints[fingerprint]}")
+                safe_print(f"[Executor] Idempotent no-progress: {function_name} x{_call_fingerprints[fingerprint]}")
                 final_executor_text = (
                     f"检测到工具 `{function_name}` 使用相同参数重复调用 "
                     f"{_call_fingerprints[fingerprint]} 次无进展，已终止。"
@@ -499,8 +500,8 @@ def run_executor_agent(
                 fatal_stop = True
                 break
 
-            print(f"\n👉 [Executor] 调用工具: {function_name}")
-            print(f"👉 [原始参数] {function_args}")
+            safe_print(f"\n[Executor] 调用工具: {function_name}")
+            safe_print(f"[Executor Args] {function_args}")
 
             func = (
                 TOOL_REGISTRY.get(function_name)
@@ -565,7 +566,7 @@ def run_executor_agent(
             else:
                 tool_content_for_model = compact_tool_content
 
-            print(f"[工具返回] {tool_content_for_model[:800]}...")
+            safe_print(f"[Tool Result] {tool_content_for_model[:800]}...")
 
             # --- 记录观察 ---
             tool_observations.append({
@@ -594,7 +595,7 @@ def run_executor_agent(
 
             # --- 致命错误检查 ---
             if is_error_result(normalized_result) and is_fatal_tool_error(normalized_result):
-                print(f"[Executor] fatal tool error detected: {function_name}")
+                safe_print(f"[Executor] fatal tool error detected: {function_name}")
                 final_executor_text = make_fatal_executor_text(function_name, normalized_result)
                 fatal_stop = True
                 break
@@ -611,7 +612,7 @@ def run_executor_agent(
                 )
 
                 if consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
-                    print(f"🛑 [Executor] Circuit breaker: {consecutive_errors} consecutive errors")
+                    safe_print(f"[Executor] Circuit breaker: {consecutive_errors} consecutive errors")
                     final_executor_text = (
                         f"连续 {MAX_CONSECUTIVE_ERRORS} 个工具调用失败，已触发熔断保护。"
                         f"最后一个错误来自 `{function_name}`。"
@@ -681,7 +682,7 @@ def _run_parallel_execution(
             }],
             "output_files": [],
         }
-    print(f"⚡ [Parallel] {len(steps)} steps → {len(batches)} batches")
+    safe_print(f"[Parallel] {len(steps)} steps -> {len(batches)} batches")
 
     # 并行执行
     observations, output_files = execute_parallel_steps(

@@ -5,6 +5,7 @@ from typing import Any, Dict, List
 from app.core.config import MODEL_NAME
 from app.agent.llm_client import client
 from app.agent.agent_utils import sanitize_final_answer
+from app.utils.console import safe_print
 
 SESSION_MEMORY: Dict[str, Dict[str, Any]] = {}
 
@@ -147,7 +148,7 @@ def maybe_compact_context(history_messages: list, session_id: str = None) -> Dic
             new_summary = resp.choices[0].message.content or ""
             state["summary"] = sanitize_final_answer(new_summary)
         except Exception as e:
-            print(f"⚠️ 上下文压缩失败: {e}")
+            safe_print(f"[context] 上下文压缩失败: {e}")
 
     if key:
         state["turn_count"] = int(state.get("turn_count", 0)) + 1
@@ -262,7 +263,7 @@ def remember_agent_turn(
     """
     key = _normalize_session_key(session_id)
     if not key:
-        print("⚠️ remember_agent_turn skipped: empty or invalid session_id")
+        safe_print("[context] remember_agent_turn skipped: empty or invalid session_id")
         return
 
     state = get_session_state(session_id)
@@ -501,14 +502,14 @@ def clear_session_memory(session_id: str = None):
     # 清理旧版本可能产生的共享默认记忆桶
     SESSION_MEMORY.pop("__default__", None)
 
-    print(f"🧹 clear_session_memory: session_id={session_id}, key={key}, remaining_keys={list(SESSION_MEMORY.keys())}")
+    safe_print(f"[context] clear_session_memory: session_id={session_id}, key={key}, remaining_keys={list(SESSION_MEMORY.keys())}")
 
 def clear_all_session_memory():
     """
     清空所有后端 session memory。
     """
     SESSION_MEMORY.clear()
-    print("🧹 clear_all_session_memory: all session memory cleared")
+    safe_print("[context] clear_all_session_memory: all session memory cleared")
 
 def debug_session_memory_keys() -> list:
     """

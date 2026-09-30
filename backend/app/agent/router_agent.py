@@ -5,6 +5,7 @@ from app.core.config import MODEL_NAME
 from app.agent.llm_client import client
 from app.agent.agent_utils import extract_json_object
 from app.agent.task_prompts import ROUTER_PROMPT
+from app.utils.console import safe_print
 
 
 def call_json_agent(system_prompt: str, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -30,7 +31,7 @@ def run_router_agent(context_pack: Dict[str, Any]) -> Dict[str, Any]:
     latest = context_pack.get("latest_user_message", "")
     command_result = _try_resolve_command(latest)
     if command_result:
-        print(f"\n⚡ [Router] Command resolved: {command_result.get('command', '')}")
+        safe_print(f"\n[Router] Command resolved: {command_result.get('command', '')}")
         return command_result
 
     payload = {
@@ -98,13 +99,30 @@ def _try_resolve_command(latest_user_message: str) -> Dict[str, Any] | None:
                 "suggested_mode": "answer_only",
                 "tool_categories": ["general"],
                 "help_text": cmd.get("help_text", ""),
+                "direct_response": cmd.get("help_text", ""),
             }
 
         skill = cmd.get("skill", "")
         task_type = cmd.get("task_type", "bioinformatics")
         tool_categories = cmd.get("tool_categories", [])
+        implementation_status = cmd.get("implementation_status", "implemented")
 
         if skill:
+            if implementation_status in {"planned", "unavailable"}:
+                return {
+                    "task_type": task_type,
+                    "subtask_type": skill,
+                    "complexity": "simple",
+                    "need_clarification": False,
+                    "clarification_question": "",
+                    "reason": f"命令不可执行: {cmd.get('command', '')}",
+                    "risk_flags": [f"skill_{implementation_status}"],
+                    "suggested_mode": "answer_only",
+                    "tool_categories": tool_categories or ["general"],
+                    "command_skill": skill,
+                    "capability_status": implementation_status,
+                    "direct_response": cmd.get("availability_message", "该命令当前不可执行。"),
+                }
             # 有 Skill 映射 → 强制 tool_execution
             return {
                 "task_type": task_type,
@@ -117,6 +135,7 @@ def _try_resolve_command(latest_user_message: str) -> Dict[str, Any] | None:
                 "suggested_mode": "tool_execution",
                 "tool_categories": tool_categories if tool_categories else ["general"],
                 "command_skill": skill,
+                "capability_status": implementation_status,
             }
 
         # 无 Skill 但有 task_type

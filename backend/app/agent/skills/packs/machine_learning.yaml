@@ -5,7 +5,7 @@ skills:
     description: "使用多种机器学习算法对样本进行二分类建模和比较"
     task_types: [bioinformatics]
     subtask_types: [ml_classification]
-    trigger_keywords: [classification, random forest, SVM, xgboost, machine learning]
+    trigger_keywords: [classification, random forest, SVM, logistic, machine learning]
     trigger_keywords_cn: [机器学习, 分类, 随机森林, SVM, 预测模型, 二分类]
     required_inputs: [feature_file, label_col]
     default_workflow_id: ml_classification_standard

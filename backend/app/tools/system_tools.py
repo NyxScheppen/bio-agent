@@ -1,10 +1,10 @@
 import os
-import json
 import platform
 import shutil
 import subprocess
 
 from app.agent.tool_registry import register_tool
+from app.agent.tool_result import make_success_result
 from app.core.runtime_paths import (
     PROJECT_ROOT,
     BACKEND_ROOT,
@@ -72,4 +72,7 @@ def scan_system_config():
         "cpu_count": os.cpu_count(),
     }
 
-    return json.dumps(info, ensure_ascii=False, indent=2)
+    return make_success_result(
+        message="后端运行环境扫描完成",
+        summary=info,
+    )

@@ -1,42 +1,45 @@
 skills:
   - skill_id: virtual_knockdown
-    name: "虚拟基因敲低"
+    name: "目标基因表达缩放情景"
     category: perturbation
-    description: "模拟基因敲低/敲除对表达谱的影响，预测下游通路变化"
+    description: "仅按比例缩放目标基因表达行，用于数值情景对照；不预测下游基因或通路变化"
     task_types: [bioinformatics]
     subtask_types: [perturbation]
     trigger_keywords: [knockdown, knockout, virtual perturbation, gene silencing]
     trigger_keywords_cn: [敲低, 敲除, 干扰, siRNA, shRNA, 虚拟扰动]
     required_inputs: [expression_file]
-    default_workflow_id: perturbation_standard
-    allowed_tools: []
+    default_workflow_id: expression_scaling_scenario
+    allowed_tools: [run_expression_scaling_scenario]
     tool_categories: [perturbation]
     max_tool_rounds: 10
     parameter_rules:
-      - param_name: target_gene
+      - param_name: gene
         strategy: from_user
         rule_description: "目标基因名"
-      - param_name: knockdown_ratio
+      - param_name: scaling_ratio
         strategy: default
         rule_description: "敲低比例（0-1）"
         default_value: 0.7
-    safety_rules: ["虚拟敲低是计算模拟", "不等同于真实实验敲除", "需要 siRNA/shRNA/CRISPR 验证"]
-    implementation_status: planned
+    safety_rules: ["只改变目标基因一行数值", "不推断任何下游响应", "不等同于真实实验敲低或敲除", "需要 siRNA/shRNA/CRISPR 验证"]
+    implementation_status: partial
     priority: medium
     version: "1.0"
 
   - skill_id: perturbation_response
     name: "扰动响应分析"
     category: perturbation
-    description: "基于 LINCS L1000 或 CRISPR 筛选数据分析药物/基因扰动的转录响应"
+    description: "基于用户上传的真实对照组与扰动组表达矩阵和样本元数据分析观测转录响应"
     task_types: [bioinformatics]
     subtask_types: [perturbation, drug_screening]
-    trigger_keywords: [LINCS, L1000, perturbation response, CRISPR screen]
-    trigger_keywords_cn: [扰动响应, LINCS, L1000, CRISPR筛选, 药物扰动]
-    required_inputs: [perturbation_data_file]
-    allowed_tools: []
-    tool_categories: [perturbation]
+    trigger_keywords: [perturbation response, observed perturbation, treated vs control]
+    trigger_keywords_cn: [扰动响应, 实验扰动, 对照组, 处理组, 敲低后差异]
+    required_inputs: [expression_file, metadata_file]
+    optional_inputs: [target_gene]
+    default_workflow_id: observed_perturbation_response
+    allowed_tools: [run_observed_perturbation_response_analysis, run_go_kegg_enrichment]
+    tool_categories: [perturbation, enrichment]
     max_tool_rounds: 12
-    implementation_status: planned
+    safety_rules: ["结果描述真实样本组间的观测关联，不证明因果", "至少每组两个生物学样本，建议三个或更多", "不声称支持 LINCS 下载或 CRISPR 筛选建模"]
+    implementation_status: implemented
     priority: medium
     version: "1.0"

@@ -60,7 +60,7 @@ skills:
     tool_categories: [enrichment, file_io]
     max_tool_rounds: 8
     safety_rules: ["GSEA 需要基因排序 score", "不同基因集数据库结果可能不同"]
-    output_expectations: [gsea_results.csv, gsea_enrichment_plot.png, gsea_leading_edge.csv]
+    output_expectations: [gsea_results.csv, gsea_dotplot.png, gsea_diagnostics.csv]
     implementation_status: implemented
     priority: high
     version: "1.0"

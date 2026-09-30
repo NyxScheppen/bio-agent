@@ -13,6 +13,7 @@
 """
 
 import inspect
+import shutil
 import threading
 import time
 from datetime import datetime
@@ -185,6 +186,12 @@ def collect_generated_files(job_dir: str) -> List[Dict[str, Any]]:
     for p in sorted(job_path.rglob("*")):
         if not p.is_file():
             continue
+        try:
+            relative_parts = p.relative_to(job_path).parts
+        except ValueError:
+            continue
+        if any(part.startswith(".omics-input-") for part in relative_parts):
+            continue
 
         # 只收集已知扩展名
         suffix = p.suffix.lower()
@@ -219,6 +226,19 @@ def collect_generated_files(job_dir: str) -> List[Dict[str, Any]]:
         })
 
     return files
+
+
+def _cleanup_private_job_inputs(job_dir: str) -> None:
+    """Remove private staged inputs, including after a killed tool subprocess."""
+    job_root = Path(job_dir).resolve()
+    for candidate in job_root.glob(".omics-input-*"):
+        try:
+            resolved = candidate.resolve()
+            resolved.relative_to(job_root)
+        except (OSError, ValueError):
+            continue
+        if resolved.is_dir():
+            shutil.rmtree(resolved, ignore_errors=True)
 
 
 def merge_output_files(
@@ -473,6 +493,10 @@ def run_tool_with_lifecycle(
         resource_usage = monitor.mark_timeout()
     else:
         resource_usage = monitor.stop()
+
+    # Private archive inputs are never artifacts. The child normally removes
+    # them in a finally block; this parent-side pass also covers hard timeouts.
+    _cleanup_private_job_inputs(ctx.job_dir)
 
     # 5. 归一化为 ToolResult
     normalized = normalize_tool_result(

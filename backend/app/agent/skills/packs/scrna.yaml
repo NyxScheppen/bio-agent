@@ -2,15 +2,15 @@ skills:
   - skill_id: scrna_standard_pipeline
     name: "单细胞标准分析流程"
     category: scrna
-    description: "单细胞 RNA-seq 标准分析：QC→标准化→HVG→PCA→UMAP→聚类"
+    description: "单个 10X RNA 数据集的 Seurat 标准分析：安全导入→QC过滤→标准化→HVG→PCA→聚类→UMAP→marker"
     task_types: [bioinformatics]
     subtask_types: [scrna_analysis, scrna_clustering]
-    trigger_keywords: [scRNA, single cell, Seurat, scRNA-seq, single-cell]
+    trigger_keywords: [scRNA, single cell, Seurat, scRNA-seq, single-cell, 10X H5]
     trigger_keywords_cn: [单细胞, scRNA, Seurat, 单细胞测序, 聚类, UMAP, tSNE]
-    required_inputs: [scrna_data_file]
-    optional_inputs: [metadata_file]
+    required_inputs: [10x_input_file]
+    optional_inputs: []
     default_workflow_id: scrna_standard
-    allowed_tools: []
+    allowed_tools: [run_scrna_standard_pipeline]
     tool_categories: [scrna]
     max_tool_rounds: 18
     parameter_rules:
@@ -26,8 +26,8 @@ skills:
         strategy: default
         rule_description: "线粒体基因最大百分比"
         default_value: 20
-    qc_rules: [run_scrna_qc]
-    safety_rules: ["细胞类型注释需要 marker 基因验证", "不要凭空命名细胞类型"]
+    qc_rules: ["应用 min_features、max_features、max_mt_percent 并报告过滤前后细胞数"]
+    safety_rules: ["每次只接受一个 10X ZIP 或 H5 数据集", "细胞类型注释未包含在本流程中", "不要凭空命名细胞类型"]
     report_sections:
       - section_id: qc
         title: "质量控制"
@@ -41,8 +41,8 @@ skills:
         title: "Marker 基因"
         content_hint: "各 cluster 的 marker 基因"
         order: 3
-    output_expectations: [umap_plot.png, cluster_markers.csv, qc_metrics.csv]
-    implementation_status: planned
+    output_expectations: [scrna_umap_clusters.png, scrna_top_markers.csv, scrna_qc_metrics.csv, scrna_standard_seurat.rds]
+    implementation_status: implemented
     priority: high
     version: "1.0"
 

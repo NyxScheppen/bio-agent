@@ -1,16 +1,3 @@
-fastapi
-uvicorn
-python-multipart
-pydantic
-cloudpickle>=3.0.0
-sqlalchemy
-python-dotenv
-openai
-pandas
-requests
-psutil>=5.9.0
-numpy
-scikit-learn
-matplotlib
-seaborn
-networkx
+# Keep a single runtime dependency contract. pip resolves this path relative to
+# this file, so either requirements entry point installs the same set.
+-r ../requirements.txt

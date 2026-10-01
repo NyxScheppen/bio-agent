@@ -4,8 +4,8 @@ BioAI Agent is an open-source, local-first assistant for reproducible bioinforma
 
 This project is the open-source software deliverable of
 [iGEM 2026 Team LZU GANSU](https://2026.igem.wiki/lzu-gansu) from Lanzhou University.
-The team's official iGEM GitLab project is
-[2026/lzu-gansu](https://gitlab.igem.org/2026/lzu-gansu).
+The official software repository is
+[2026/software/lzu-gansu/bio-agent](https://gitlab.igem.org/2026/software/lzu-gansu/bio-agent).
 
 [Chinese README](README.md) | [iGEM submission guide](docs/IGEM_SUBMISSION.md) | [Behavior verification](docs/README_FEATURE_VERIFICATION.md)
 
@@ -136,8 +136,10 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the development workflow. The final m
 - **Official team slug:** `lzu-gansu`
 - **Team wiki:** [https://2026.igem.wiki/lzu-gansu](https://2026.igem.wiki/lzu-gansu)
 - **iGEM GitLab wiki project:** [https://gitlab.igem.org/2026/lzu-gansu](https://gitlab.igem.org/2026/lzu-gansu)
+- **iGEM software repository:** [https://gitlab.igem.org/2026/software/lzu-gansu/bio-agent](https://gitlab.igem.org/2026/software/lzu-gansu/bio-agent)
+- **Responsible AI guidance:** [.claude/RESPONSIBLE_AI_USE.md](.claude/RESPONSIBLE_AI_USE.md)
 
-The dedicated iGEM software repository will be linked after the team claims it through the official Software Deliverable portal. Individual contributions and supervisor credits are maintained in the final Attributions Form and team wiki.
+Individual contributions and supervisor credits are maintained in the final Attributions Form and team wiki.
 
 ## License
 

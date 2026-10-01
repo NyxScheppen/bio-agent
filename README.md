@@ -6,8 +6,8 @@
 > 通过自然语言对话执行专业生信分析 —— 从数据上传到可视化全流程自动化
 
 本项目是 [iGEM 2026 Team LZU GANSU](https://2026.igem.wiki/lzu-gansu) 的开源软件成果。
-队伍的官方 iGEM GitLab 项目位于
-[2026/lzu-gansu](https://gitlab.igem.org/2026/lzu-gansu)。
+官方软件仓库位于
+[2026/software/lzu-gansu/bio-agent](https://gitlab.igem.org/2026/software/lzu-gansu/bio-agent)。
 
 **版本**: 2.0 &nbsp;|&nbsp; **最后更新**: 2026-09-30
 
@@ -304,5 +304,6 @@ skills:
 - **队伍 Wiki**：[https://2026.igem.wiki/lzu-gansu](https://2026.igem.wiki/lzu-gansu)
 - **iGEM GitLab Wiki 项目**：[https://gitlab.igem.org/2026/lzu-gansu](https://gitlab.igem.org/2026/lzu-gansu)
 
-软件专用 iGEM GitLab 仓库将在队伍通过官方 Software Deliverable 页面领取后补充。
+- **iGEM 软件仓库**：[https://gitlab.igem.org/2026/software/lzu-gansu/bio-agent](https://gitlab.igem.org/2026/software/lzu-gansu/bio-agent)
+- **Responsible AI 使用说明**：[.claude/RESPONSIBLE_AI_USE.md](.claude/RESPONSIBLE_AI_USE.md)
 个人贡献与指导教师信息以最终 Attributions Form 和队伍 Wiki 为准。

@@ -36,6 +36,7 @@ FORBIDDEN_DIRS = (
 FORBIDDEN_SUFFIXES = {".db", ".sqlite", ".sqlite3", ".pem", ".key", ".p12", ".pfx"}
 FORBIDDEN_FILES = {"runtime/run_backend.bat"}
 TEAM_NAME = "iGEM 2026 Team LZU GANSU"
+SOFTWARE_REPOSITORY = "gitlab.igem.org/2026/software/lzu-gansu/bio-agent"
 WORKSPACE_PATH_PATTERN = re.compile(
     r"(?i)(?:[a-z]:[\\/](?:users|desktop|documents|downloads|projects|workspaces)[\\/]|/(?:home|users)/[^/\s]+/)"
 )
@@ -101,6 +102,8 @@ def main() -> int:
     for filename, text in (("README.md", readme), ("README.en.md", english_readme)):
         if TEAM_NAME not in text or "2026.igem.wiki/lzu-gansu" not in text:
             errors.append(f"{filename} is missing verified LZU GANSU team attribution")
+        if SOFTWARE_REPOSITORY not in text:
+            errors.append(f"{filename} is missing the dedicated iGEM software repository URL")
 
     for lockfile in ("frontend/package-lock.json", "renv.lock"):
         try:

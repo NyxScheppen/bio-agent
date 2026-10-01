@@ -421,6 +421,7 @@ if (all(status_df$status == "error")) stop("GO 和 KEGG 富集均失败，请查
 @register_tool(
     name="run_gsea_analysis",
     description="对排序基因列表进行 GSEA 分析。输入文件应包含 gene 和 score 两列。",
+    timeout=GSEA_R_TIMEOUT_SECONDS,
     parameters={
         "type": "object",
         "properties": {

@@ -1,4 +1,6 @@
+import gzip
 import stat
+import struct
 import zipfile
 from pathlib import Path
 
@@ -39,9 +41,9 @@ def _prepare(monkeypatch, tmp_path: Path, archive: Path, input_type: str):
 
 def test_prepare_valid_10x_zip_and_cleanup(monkeypatch, tmp_path):
     archive = _zip(tmp_path / "tenx.zip", {
-        "sample/filtered_feature_bc_matrix/matrix.mtx.gz": b"matrix",
-        "sample/filtered_feature_bc_matrix/barcodes.tsv.gz": b"barcodes",
-        "sample/filtered_feature_bc_matrix/features.tsv.gz": b"features",
+        "sample/filtered_feature_bc_matrix/matrix.mtx.gz": gzip.compress(b"matrix"),
+        "sample/filtered_feature_bc_matrix/barcodes.tsv.gz": gzip.compress(b"barcodes"),
+        "sample/filtered_feature_bc_matrix/features.tsv.gz": gzip.compress(b"features"),
     })
 
     prepared = _prepare(monkeypatch, tmp_path, archive, "scrna")
@@ -110,6 +112,40 @@ def test_zip_rejects_entry_budget_before_extraction(monkeypatch, tmp_path):
     archive = _zip(tmp_path / "many.zip", {"a": b"1", "b": b"2"})
     monkeypatch.setattr(omics_input, "MAX_ARCHIVE_ENTRIES", 1)
     with pytest.raises(OmicsInputError, match="too many entries"):
+        _prepare(monkeypatch, tmp_path, archive, "scrna")
+
+
+def test_zip_rejects_forged_eocd_count_before_zipfile_allocation(monkeypatch, tmp_path):
+    archive = _zip(
+        tmp_path / "forged-count.zip",
+        {"a": b"1", "b": b"2", "c": b"3"},
+    )
+    payload = bytearray(archive.read_bytes())
+    eocd_offset = payload.rfind(b"PK\x05\x06")
+    assert eocd_offset >= 0
+    struct.pack_into("<H", payload, eocd_offset + 8, 1)
+    struct.pack_into("<H", payload, eocd_offset + 10, 1)
+    archive.write_bytes(payload)
+    monkeypatch.setattr(omics_input, "MAX_ARCHIVE_ENTRIES", 2)
+
+    class UnexpectedZipFile:
+        def __init__(self, *args, **kwargs):
+            raise AssertionError("ZipFile must not be constructed before entry validation")
+
+    monkeypatch.setattr(omics_input.zipfile, "ZipFile", UnexpectedZipFile)
+    with pytest.raises(OmicsInputError, match="too many entries"):
+        _prepare(monkeypatch, tmp_path, archive, "scrna")
+
+
+def test_nested_gzip_expansion_counts_toward_archive_budget(monkeypatch, tmp_path):
+    archive = _zip(tmp_path / "nested-gzip.zip", {
+        "matrix/matrix.mtx.gz": gzip.compress(b"m" * 40),
+        "matrix/barcodes.tsv.gz": gzip.compress(b"b" * 40),
+        "matrix/features.tsv.gz": gzip.compress(b"f" * 40),
+    })
+    monkeypatch.setattr(omics_input, "MAX_EXPANDED_BYTES", 150)
+
+    with pytest.raises(OmicsInputError, match="Nested GZIP expanded-size budget"):
         _prepare(monkeypatch, tmp_path, archive, "scrna")
 
 

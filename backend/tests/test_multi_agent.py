@@ -93,6 +93,7 @@ def test_delegator_converts_ids_to_task_indexes() -> None:
     tasks = _steps_to_sub_tasks(steps, {"20": [10]})
     _assert_equal(tasks[1]["depends_on"], [0])
     _assert_equal(tasks[1]["args"], {"path": "$step_0"})
+    _assert_equal([task["timeout"] for task in tasks], [None, None])
 
 
 def test_delegator_preserves_parallel_group_allowlist() -> None:
@@ -160,6 +161,7 @@ def test_orchestrator_preserves_planner_parameters() -> None:
     )
     _assert_equal(orchestrator.tasks["2"].args, {"path": "input.csv"})
     _assert_equal(orchestrator.tasks["2"].depends_on, [])
+    _assert_equal(orchestrator.tasks["2"].timeout, None)
 
 
 def test_delegated_tasks_reach_sub_agent_manager() -> None:
@@ -174,7 +176,7 @@ def test_delegated_tasks_reach_sub_agent_manager() -> None:
             tasks: list[SubAgentTask],
             session_id: str = "",
         ) -> list[SubAgentResult]:
-            calls.append((tasks[0].tool, tasks[0].args, session_id))
+            calls.append((tasks[0].tool, tasks[0].args, tasks[0].timeout, session_id))
             return [
                 SubAgentResult(
                     task_index=0,
@@ -195,7 +197,7 @@ def test_delegated_tasks_reach_sub_agent_manager() -> None:
         restore()
         bio_module.TOOL_REGISTRY.pop("demo", None)
 
-    _assert_equal(calls, [("demo", {"x": 1}, "parent")])
+    _assert_equal(calls, [("demo", {"x": 1}, None, "parent")])
     _assert_equal(result["tool_observations"][0]["status"], "success")
 
 
@@ -323,6 +325,29 @@ def test_sub_agent_preserves_parent_session_id() -> None:
         module.TOOL_REGISTRY.pop("session_tool", None)
 
     _assert_equal(received, ["real_session"])
+    _assert_equal(result.status, "success")
+
+
+def test_sub_agent_uses_tool_timeout_when_task_has_no_override() -> None:
+    import app.agent.sub_agent_manager as module
+
+    received = []
+    module.TOOL_REGISTRY["registered_timeout"] = lambda: None
+
+    def fake_runner(**kwargs: Any) -> Any:
+        received.append(kwargs.get("timeout_override"))
+        return make_success_result("ok")
+
+    restore = _patched(module, "run_tool_with_lifecycle", fake_runner)
+    try:
+        result = SubAgentManager().spawn_and_collect_all([
+            SubAgentTask(goal="inherit", tool="registered_timeout"),
+        ])[0]
+    finally:
+        restore()
+        module.TOOL_REGISTRY.pop("registered_timeout", None)
+
+    _assert_equal(received, [None])
     _assert_equal(result.status, "success")
 
 

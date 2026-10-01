@@ -187,7 +187,12 @@ def run_delegator_agent(
             # 委派任务采用至多一次执行语义。
             t["max_retries"] = 0
             try:
-                t["timeout"] = max(10, min(int(t.get("timeout", 600)), 3600))
+                raw_timeout = t.get("timeout")
+                t["timeout"] = (
+                    None
+                    if raw_timeout in (None, "")
+                    else max(10, min(int(raw_timeout), 3600))
+                )
             except (TypeError, ValueError):
                 continue
             valid_tasks.append(t)
@@ -228,6 +233,7 @@ def _steps_to_sub_tasks(
                 raise ValueError(f"步骤 {sid} 不能依赖自身")
             if dependency_index not in normalized_dependencies:
                 normalized_dependencies.append(dependency_index)
+        raw_timeout = s.get("timeout")
         tasks.append({
             "goal": s.get("goal", ""),
             "tool": tools[0] if tools else "",
@@ -238,7 +244,11 @@ def _steps_to_sub_tasks(
             "depends_on": normalized_dependencies,
             "schedule_after": [],
             "max_retries": 0,
-            "timeout": max(10, min(int(s.get("timeout", 600) or 600), 3600)),
+            "timeout": (
+                None
+                if raw_timeout in (None, "")
+                else max(10, min(int(raw_timeout), 3600))
+            ),
         })
 
     if parallel_groups:

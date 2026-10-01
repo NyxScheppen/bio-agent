@@ -731,7 +731,7 @@ def test_unshared_legacy_generated_artifact_does_not_block_session_delete(
     from app.services.session_service import delete_session_with_files
 
     _, _, generated = isolated_storage
-    legacy = generated / "legacy_job_123" / "report.csv"
+    legacy = generated / "legacy_job_123" / "nested" / "tables" / "report.csv"
     legacy.parent.mkdir(parents=True)
     legacy.write_text("legacy", encoding="utf-8")
 
@@ -740,7 +740,7 @@ def test_unshared_legacy_generated_artifact_does_not_block_session_delete(
         db_session,
         "legacy_owner",
         "report.csv",
-        "generated/legacy_job_123/report.csv",
+        "generated/legacy_job_123/nested/tables/report.csv",
         "table",
         "generated",
     )

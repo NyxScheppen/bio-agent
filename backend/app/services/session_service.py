@@ -62,7 +62,7 @@ def _stage_file_for_deletion(db, file_record, session_id: str):
             storage_relative = Path()
         is_legacy_generated = (
             getattr(file_record, "source_type", "") == "generated"
-            and len(storage_relative.parts) == 3
+            and len(storage_relative.parts) >= 3
             and storage_relative.parts[0] == "generated"
             and crud.get_session(db, storage_relative.parts[1]) is None
         )

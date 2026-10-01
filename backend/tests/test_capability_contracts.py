@@ -234,6 +234,12 @@ def test_enrichment_templates_isolate_go_kegg_and_use_current_msigdbr_api(monkey
     assert "options(timeout = 600L)" in gsea_code
     assert gsea_kwargs["timeout"] == enrichment_tools.GSEA_R_TIMEOUT_SECONDS
     assert gsea_kwargs["timeout"] > 600
+    from app.agent.tool_registry import get_tool_meta
+
+    assert (
+        get_tool_meta("run_gsea_analysis")["timeout"]
+        == enrichment_tools.GSEA_R_TIMEOUT_SECONDS
+    )
 
 
 def test_gsea_dns_diagnostic_flags_sinkhole_answers(monkeypatch):

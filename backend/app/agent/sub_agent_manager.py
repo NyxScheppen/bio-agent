@@ -21,7 +21,7 @@
 
 import concurrent.futures
 import time
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -37,7 +37,7 @@ class SubAgentTask(BaseModel):
     args: Dict[str, Any] = Field(default_factory=dict)
     depends_on: List[int] = Field(default_factory=list)  # 依赖的任务索引
     max_retries: int = Field(default=0, ge=0, le=3)
-    timeout: int = Field(default=600, ge=10, le=3600)
+    timeout: Optional[int] = Field(default=None, ge=10, le=3600)
 
 
 class SubAgentResult(BaseModel):

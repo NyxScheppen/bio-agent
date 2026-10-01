@@ -44,7 +44,7 @@ class KanbanTask:
         depends_on: Optional[List[str]] = None,
         schedule_after: Optional[List[str]] = None,
         max_retries: int = 0,
-        timeout: int = 600,
+        timeout: Optional[int] = None,
     ):
         self.task_id = task_id
         self.name = name
@@ -103,7 +103,7 @@ class Orchestrator:
         depends_on: Optional[List[str]] = None,
         schedule_after: Optional[List[str]] = None,
         max_retries: int = 0,
-        timeout: int = 600,
+        timeout: Optional[int] = None,
     ) -> "Orchestrator":
         """添加一个任务到 Kanban 板。"""
         self.tasks[task_id] = KanbanTask(
@@ -141,7 +141,11 @@ class Orchestrator:
                 args=dict(s.get("parameters", {}) or {}),
                 depends_on=[str(d) for d in deps],
                 max_retries=int(s.get("max_retries", 0) or 0),
-                timeout=int(s.get("timeout", 600) or 600),
+                timeout=(
+                    None
+                    if s.get("timeout") in (None, "")
+                    else max(10, min(int(s["timeout"]), 3600))
+                ),
             )
         return self
 

@@ -142,6 +142,7 @@ def _run_delegated_tasks(
     for index, task in enumerate(sub_tasks):
         dependencies = [str(dep) for dep in task.get("depends_on", [])]
         schedule_after = [str(dep) for dep in task.get("schedule_after", [])]
+        raw_timeout = task.get("timeout")
         orchestrator.add_task(
             task_id=str(index),
             name=str(task.get("goal", "")),
@@ -150,7 +151,11 @@ def _run_delegated_tasks(
             depends_on=dependencies,
             schedule_after=schedule_after,
             max_retries=max(0, min(int(task.get("max_retries", 0) or 0), 3)),
-            timeout=max(10, min(int(task.get("timeout", 600) or 600), 3600)),
+            timeout=(
+                None
+                if raw_timeout in (None, "")
+                else max(10, min(int(raw_timeout), 3600))
+            ),
         )
 
     result = orchestrator.run_all(session_id=session_id)

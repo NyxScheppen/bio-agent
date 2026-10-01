@@ -45,6 +45,13 @@ class PreparedOmicsInput:
         shutil.rmtree(cleanup_root)
 
 
+@dataclass(frozen=True)
+class _ZipDirectoryMetadata:
+    entry_count: int
+    offset: int
+    size: int
+
+
 def _validated_job_root(job_dir: str | Path) -> Path:
     root = Path(job_dir).resolve()
     try:
@@ -55,8 +62,8 @@ def _validated_job_root(job_dir: str | Path) -> Path:
     return root
 
 
-def _read_eocd_entry_count(path: Path) -> int:
-    """Read the classic ZIP entry count without materializing the central directory."""
+def _read_eocd_metadata(path: Path) -> _ZipDirectoryMetadata:
+    """Read a classic ZIP EOCD without trusting it as the entry-count budget."""
     file_size = path.stat().st_size
     tail_size = min(file_size, 65_557)
     with path.open("rb") as handle:
@@ -72,13 +79,77 @@ def _read_eocd_entry_count(path: Path) -> int:
             if position + 22 + comment_length == len(tail):
                 disk_number, directory_disk = fields[1], fields[2]
                 entries_on_disk, entries_total = fields[3], fields[4]
+                directory_size, directory_offset = fields[5], fields[6]
                 if disk_number != 0 or directory_disk != 0 or entries_on_disk != entries_total:
                     raise OmicsInputError("Multi-disk ZIP archives are not supported")
-                if entries_total == 0xFFFF:
+                if (
+                    entries_total == 0xFFFF
+                    or directory_size == 0xFFFFFFFF
+                    or directory_offset == 0xFFFFFFFF
+                ):
                     raise OmicsInputError("ZIP64 archives are not supported")
-                return entries_total
+                eocd_offset = file_size - tail_size + position
+                if directory_offset + directory_size != eocd_offset:
+                    raise OmicsInputError(
+                        "ZIP central-directory offset or size is inconsistent"
+                    )
+                return _ZipDirectoryMetadata(
+                    entry_count=entries_total,
+                    offset=directory_offset,
+                    size=directory_size,
+                )
         position = tail.rfind(signature, 0, position)
     raise OmicsInputError("Invalid ZIP archive: end-of-central-directory record not found")
+
+
+def _validate_zip_central_directory(path: Path) -> int:
+    """Count central-directory headers before ``ZipFile`` allocates ``ZipInfo`` objects."""
+    metadata = _read_eocd_metadata(path)
+    directory_end = metadata.offset + metadata.size
+    cursor = metadata.offset
+    entry_count = 0
+
+    with path.open("rb") as handle:
+        handle.seek(metadata.offset)
+        while cursor < directory_end:
+            if directory_end - cursor < 46:
+                raise OmicsInputError("ZIP central directory is truncated")
+            header = handle.read(46)
+            if len(header) != 46 or header[:4] != b"PK\x01\x02":
+                raise OmicsInputError("ZIP central directory contains an invalid entry")
+
+            fields = struct.unpack("<4s6H3L5H2L", header)
+            compressed_size = fields[8]
+            expanded_size = fields[9]
+            filename_length = fields[10]
+            extra_length = fields[11]
+            comment_length = fields[12]
+            starting_disk = fields[13]
+            local_header_offset = fields[16]
+            if (
+                starting_disk != 0
+                or compressed_size == 0xFFFFFFFF
+                or expanded_size == 0xFFFFFFFF
+                or local_header_offset == 0xFFFFFFFF
+            ):
+                raise OmicsInputError("ZIP64 and multi-disk entries are not supported")
+
+            variable_length = filename_length + extra_length + comment_length
+            next_cursor = cursor + 46 + variable_length
+            if next_cursor > directory_end:
+                raise OmicsInputError("ZIP central directory is truncated")
+
+            entry_count += 1
+            if entry_count > MAX_ARCHIVE_ENTRIES:
+                raise OmicsInputError(
+                    f"ZIP contains too many entries ({entry_count} > {MAX_ARCHIVE_ENTRIES})"
+                )
+            handle.seek(variable_length, 1)
+            cursor = next_cursor
+
+    if entry_count != metadata.entry_count:
+        raise OmicsInputError("ZIP central-directory entry count is inconsistent")
+    return entry_count
 
 
 def _safe_member_path(filename: str) -> PurePosixPath:
@@ -134,16 +205,12 @@ def _validate_zip_members(archive: Path, infos: list[zipfile.ZipInfo]) -> None:
         raise OmicsInputError("ZIP aggregate compression ratio is too high")
 
 
-def _extract_validated_zip(archive: Path, destination: Path) -> None:
-    declared_count = _read_eocd_entry_count(archive)
-    if declared_count > MAX_ARCHIVE_ENTRIES:
-        raise OmicsInputError(
-            f"ZIP contains too many entries ({declared_count} > {MAX_ARCHIVE_ENTRIES})"
-        )
+def _extract_validated_zip(archive: Path, destination: Path) -> int:
+    validated_count = _validate_zip_central_directory(archive)
 
     with zipfile.ZipFile(archive) as bundle:
         infos = bundle.infolist()
-        if declared_count != len(infos):
+        if validated_count != len(infos):
             raise OmicsInputError("ZIP central-directory entry count is inconsistent")
         _validate_zip_members(archive, infos)
 
@@ -172,6 +239,43 @@ def _extract_validated_zip(archive: Path, destination: Path) -> None:
                     if member_written > MAX_MEMBER_BYTES or written > MAX_EXPANDED_BYTES:
                         raise OmicsInputError("ZIP expanded-size budget exceeded while extracting")
                     output.write(chunk)
+    return written
+
+
+def _validate_nested_gzip_budget(root: Path, extracted_bytes: int) -> None:
+    """Bound the second expansion layer consumed later by Seurat/Matrix readers."""
+    expanded_total = extracted_bytes
+    for candidate in root.rglob("*"):
+        if not candidate.is_file() or candidate.suffix.casefold() != ".gz":
+            continue
+
+        compressed_size = candidate.stat().st_size
+        member_expanded = 0
+        try:
+            with gzip.open(candidate, "rb") as source:
+                while True:
+                    chunk = source.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    member_expanded += len(chunk)
+                    expanded_total += len(chunk)
+                    if member_expanded > MAX_MEMBER_BYTES:
+                        raise OmicsInputError(
+                            f"Nested GZIP member is too large: {candidate.name}"
+                        )
+                    if expanded_total > MAX_EXPANDED_BYTES:
+                        raise OmicsInputError("Nested GZIP expanded-size budget exceeded")
+                    if (
+                        compressed_size == 0
+                        or member_expanded / compressed_size > MAX_COMPRESSION_RATIO
+                    ):
+                        raise OmicsInputError(
+                            f"Nested GZIP compression ratio is too high: {candidate.name}"
+                        )
+        except OmicsInputError:
+            raise
+        except (EOFError, OSError) as exc:
+            raise OmicsInputError(f"Invalid nested GZIP file: {candidate.name}") from exc
 
 
 def _validate_hdf5(path: Path) -> None:
@@ -273,7 +377,8 @@ def prepare_omics_input(
     extraction_root = job_root / f".omics-input-{uuid.uuid4().hex[:10]}"
     extraction_root.mkdir(parents=False, exist_ok=False)
     try:
-        _extract_validated_zip(source, extraction_root)
+        extracted_bytes = _extract_validated_zip(source, extraction_root)
+        _validate_nested_gzip_budget(extraction_root, extracted_bytes)
         if input_type == "scrna":
             path, kind = _find_10x_input(extraction_root)
             if kind == "mtx_dir":

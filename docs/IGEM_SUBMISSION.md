@@ -59,7 +59,7 @@ git fetch igem
 git push igem main
 ```
 
-The original iGEM-generated template history is retained in `codex/igem-template-original`; `main` contains the complete software and the merge that connects both histories.
+The original iGEM-generated template history is retained in `codex/igem-template-original`. The iGEM server limits each received Git pack to 11 MiB, while the early development history contains removed virtual-environment binaries larger than that limit. Therefore the iGEM `main` branch receives a complete, reproducible source snapshot parented to the official template history. The full development history remains public at <https://github.com/NyxScheppen/bio-agent>.
 
 Do not paste access tokens into the remote URL, documentation, terminal screenshots, or CI files. Use the Git credential manager or an SSH key registered to the team account.
 

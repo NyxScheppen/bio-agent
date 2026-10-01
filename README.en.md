@@ -137,6 +137,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the development workflow. The final m
 - **Team wiki:** [https://2026.igem.wiki/lzu-gansu](https://2026.igem.wiki/lzu-gansu)
 - **iGEM GitLab wiki project:** [https://gitlab.igem.org/2026/lzu-gansu](https://gitlab.igem.org/2026/lzu-gansu)
 - **iGEM software repository:** [https://gitlab.igem.org/2026/software/lzu-gansu/bio-agent](https://gitlab.igem.org/2026/software/lzu-gansu/bio-agent)
+- **Full development-history mirror:** [https://github.com/NyxScheppen/bio-agent](https://github.com/NyxScheppen/bio-agent)
 - **Responsible AI guidance:** [.claude/RESPONSIBLE_AI_USE.md](.claude/RESPONSIBLE_AI_USE.md)
 
 Individual contributions and supervisor credits are maintained in the final Attributions Form and team wiki.

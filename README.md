@@ -305,5 +305,6 @@ skills:
 - **iGEM GitLab Wiki 项目**：[https://gitlab.igem.org/2026/lzu-gansu](https://gitlab.igem.org/2026/lzu-gansu)
 
 - **iGEM 软件仓库**：[https://gitlab.igem.org/2026/software/lzu-gansu/bio-agent](https://gitlab.igem.org/2026/software/lzu-gansu/bio-agent)
+- **完整开发历史镜像**：[https://github.com/NyxScheppen/bio-agent](https://github.com/NyxScheppen/bio-agent)
 - **Responsible AI 使用说明**：[.claude/RESPONSIBLE_AI_USE.md](.claude/RESPONSIBLE_AI_USE.md)
 个人贡献与指导教师信息以最终 Attributions Form 和队伍 Wiki 为准。

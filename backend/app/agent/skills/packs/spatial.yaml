@@ -1,0 +1,58 @@
+skills:
+  - skill_id: spatial_clustering
+    name: "Visium 表达聚类与空间投影"
+    category: spatial
+    description: "对单个 10X Visium 数据集执行 QC、SCTransform 和表达聚类，并投影到组织切片；不是空间感知聚类"
+    task_types: [bioinformatics]
+    subtask_types: [spatial_analysis, spatial_clustering]
+    trigger_keywords: [spatial transcriptomics, Visium, spatial clustering]
+    trigger_keywords_cn: [空间转录组, 空间聚类, Visium, 空间分析]
+    required_inputs: [visium_zip_file]
+    optional_inputs: [feature_genes]
+    allowed_tools: [run_visium_standard_pipeline]
+    tool_categories: [spatial]
+    max_tool_rounds: 14
+    safety_rules: ["每次只接受一个完整 Space Ranger ZIP", "当前聚类仅基于表达并投影到空间，不是空间感知聚类", "不包含空间反卷积"]
+    report_sections:
+      - section_id: spatial_map
+        title: "空间分布图"
+        content_hint: "空间聚类、基因表达空间分布"
+        order: 1
+      - section_id: cluster_markers
+        title: "空间区域 marker"
+        content_hint: "各空间区域的 marker 基因"
+        order: 2
+    output_expectations: [visium_expression_clusters_spatial.png, visium_top_markers.csv, visium_qc_metrics.csv, visium_standard_seurat.rds]
+    implementation_status: implemented
+    priority: high
+    version: "1.0"
+
+  - skill_id: spatial_region_de
+    name: "空间区域差异分析"
+    category: spatial
+    description: "对不同空间区域进行差异表达分析"
+    task_types: [bioinformatics]
+    subtask_types: [spatial_analysis]
+    trigger_keywords_cn: [空间差异, 区域差异, 空间 DEG]
+    required_inputs: [expression_file, spatial_coords_file, region_labels]
+    allowed_tools: []
+    tool_categories: [spatial]
+    max_tool_rounds: 10
+    implementation_status: planned
+    priority: medium
+    version: "1.0"
+
+  - skill_id: spatial_cell_deconvolution
+    name: "空间转录组反卷积"
+    category: spatial
+    description: "使用 RCTD/SPOTlight 对空间转录组 spot 进行细胞类型反卷积"
+    task_types: [bioinformatics]
+    subtask_types: [spatial_deconvolution]
+    trigger_keywords_cn: [反卷积, 细胞比例, RCTD, SPOTlight]
+    required_inputs: [spatial_data_file, scrna_reference]
+    allowed_tools: []
+    tool_categories: [spatial, scrna]
+    max_tool_rounds: 14
+    implementation_status: planned
+    priority: low
+    version: "1.0"

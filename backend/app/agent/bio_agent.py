@@ -1,0 +1,430 @@
+import asyncio
+import json
+from typing import Any, Dict, List, Optional
+
+from app.core.config import MODEL_NAME
+from app.agent.llm_client import client
+from app.agent.agent_utils import sanitize_final_answer
+from app.agent.context_manager import (
+    maybe_compact_context,
+    enrich_context_with_session_memory,
+    resolve_short_user_reply,
+    remember_agent_turn,
+)
+from app.agent.router_agent import run_router_agent
+from app.agent.planner_agent import run_planner_agent
+from app.agent.executor_agent import run_executor_agent
+from app.agent.reporter_agent import run_reporter_agent
+from app.agent.delegator_agent import run_delegator_agent
+from app.agent.orchestrator import Orchestrator
+from app.agent.category_router import resolve_tool_categories
+from app.agent.task_prompts import REPORTER_PROMPT, build_domain_prompt
+from app.agent.agent_constants import FEATURE_FLAGS
+
+# Skill system
+from app.agent.skills.skill_models import SkillSpec
+from app.agent.skills.skill_registry import SKILL_REGISTRY
+from app.agent.skills.skill_router import select_skill
+from app.agent.skills.builtin_skills import register_all_builtin_skills
+from app.agent.skills.tool_policy import allowed_tool_names_for_skill
+from app.agent.tool_registry import TOOL_REGISTRY
+from app.utils.console import safe_print
+
+# 触发 tools 下所有模块的工具注册
+from app import tools  # noqa
+
+# 注册内置 Skills（仅首次）
+if not SKILL_REGISTRY:
+    register_all_builtin_skills()
+
+def _dedupe_files(files: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    去重文件列表，避免同一个文件被重复返回给前端。
+    """
+    result = []
+    seen = set()
+
+    for f in files or []:
+        if not isinstance(f, dict):
+            continue
+
+        key = (
+            str(f.get("relative_path", "")),
+            str(f.get("url", "")),
+            str(f.get("name", "")),
+        )
+
+        if key in seen:
+            continue
+
+        seen.add(key)
+        result.append(f)
+
+    return result
+
+def _make_agent_result(answer: str, files: List[Dict[str, Any]] | None = None) -> Dict[str, Any]:
+    """
+    统一 Agent 返回格式。
+
+    重要：
+    以前 run_bio_agent 只返回字符串 final_answer，
+    导致 chat_service 只能从文本中解析图片路径。
+    如果模型没有把图片路径写进最终回答，前端就拿不到图片。
+
+    现在统一返回：
+    {
+        "answer": "...",
+        "files": [...]
+    }
+    """
+    return {
+        "answer": sanitize_final_answer(answer or ""),
+        "files": _dedupe_files(files or []),
+    }
+
+
+def _normalize_execution_mode(value: Any) -> str:
+    """统一历史 Router/Planner 的执行模式命名。"""
+    mode = str(value or "").strip().lower()
+    if mode == "direct_answer":
+        return "answer_only"
+    if mode in {"answer_only", "tool_execution", "ask_user"}:
+        return mode
+    return "tool_execution"
+
+
+def _available_files_from_context(context_pack: Dict[str, Any]) -> List[str]:
+    """Extract file names only from trusted, structured attachment metadata."""
+    values = context_pack.get("available_files", [])
+    if not isinstance(values, (list, tuple)):
+        return []
+
+    normalized: List[str] = []
+    for value in values:
+        if isinstance(value, dict):
+            name = value.get("filename") or value.get("name") or value.get("relative_path")
+        else:
+            name = value
+        basename = str(name or "").strip().replace("\\", "/").rsplit("/", 1)[-1]
+        if basename:
+            normalized.append(basename)
+    return list(dict.fromkeys(normalized))
+
+
+def _run_delegated_tasks(
+    sub_tasks: List[Dict[str, Any]],
+    session_id: str,
+    selected_skill: Optional[SkillSpec] = None,
+) -> Dict[str, Any]:
+    """将 Delegator 输出交给 Orchestrator 执行并转换为 Executor 协议。"""
+    allowed_tools = allowed_tool_names_for_skill(selected_skill, TOOL_REGISTRY)
+    disallowed_tools = sorted({
+        str(task.get("tool", ""))
+        for task in sub_tasks
+        if str(task.get("tool", "")) not in allowed_tools
+    })
+    if disallowed_tools:
+        message = f"Skill 工具策略拒绝委派工具: {disallowed_tools}"
+        return {
+            "executor_text": message,
+            "tool_observations": [{
+                "tool": "skill_tool_policy",
+                "args": {},
+                "result_summary": message,
+                "output_files": [],
+                "status": "error",
+                "errors": ["delegated_tool_not_allowed"],
+            }],
+            "output_files": [],
+        }
+
+    orchestrator = Orchestrator()
+    for index, task in enumerate(sub_tasks):
+        dependencies = [str(dep) for dep in task.get("depends_on", [])]
+        schedule_after = [str(dep) for dep in task.get("schedule_after", [])]
+        raw_timeout = task.get("timeout")
+        orchestrator.add_task(
+            task_id=str(index),
+            name=str(task.get("goal", "")),
+            tool=str(task.get("tool", "")),
+            args=dict(task.get("args", {}) or {}),
+            depends_on=dependencies,
+            schedule_after=schedule_after,
+            max_retries=max(0, min(int(task.get("max_retries", 0) or 0), 3)),
+            timeout=(
+                None
+                if raw_timeout in (None, "")
+                else max(10, min(int(raw_timeout), 3600))
+            ),
+        )
+
+    result = orchestrator.run_all(session_id=session_id)
+    observations: List[Dict[str, Any]] = []
+    for status_key, status in (
+        ("completed", "success"),
+        ("failed", "error"),
+        ("blocked", "blocked"),
+    ):
+        for item in result.get(status_key, []):
+            observations.append({
+                "tool": item.get("tool") or "sub_agent",
+                "args": item.get("args", {}),
+                "result_summary": (
+                    item.get("message")
+                    or item.get("error")
+                    or item.get("reason")
+                    or item.get("name", "")
+                ),
+                "output_files": item.get("files", []),
+                "status": status,
+                "task_id": item.get("task_id", ""),
+                "goal": item.get("name", ""),
+            })
+
+    return {
+        "executor_text": result.get("summary", "子Agent 执行完成"),
+        "tool_observations": observations,
+        "output_files": result.get("all_output_files", []),
+    }
+
+def _run_bio_agent_sync(
+    history_messages: list,
+    session_id: str = "",
+    available_files: Optional[List[Any]] = None,
+) -> Dict[str, Any]:
+    """
+    Multi-Agent 主入口：
+    1. 压缩上下文
+    2. 注入 session memory
+    3. 解析短回复，例如 “1 / 选1 / 第一个”
+    4. Router 判断任务
+    5. Planner 制定计划
+    6. Executor 调用工具
+    7. Reporter 生成最终回复
+    8. 写回 session memory
+    9. 返回 answer + files，确保前端能拿到真实生成文件
+    """
+    context_pack = maybe_compact_context(
+        history_messages,
+        session_id=session_id
+    )
+    context_pack["available_files"] = list(available_files or [])
+
+    context_pack = enrich_context_with_session_memory(
+        context_pack=context_pack,
+        session_id=session_id
+    )
+
+    context_pack = resolve_short_user_reply(
+        context_pack=context_pack,
+        session_id=session_id
+    )
+
+    router_result = run_router_agent(context_pack)
+    safe_print(f"\n[Router] {json.dumps(router_result, ensure_ascii=False, default=str)}")
+
+    direct_response = str(router_result.get("direct_response", "")).strip()
+    if direct_response:
+        final_answer = sanitize_final_answer(direct_response)
+        remember_agent_turn(
+            session_id=session_id,
+            final_answer=final_answer,
+            router_result=router_result,
+            planner_result={},
+            executor_result={},
+        )
+        return _make_agent_result(final_answer, files=[])
+
+    # Phase 3+: Skill 选择（在 Router 之后、Planner 之前）
+    selected_skill: Optional[SkillSpec] = select_skill(
+        latest_user_message=context_pack.get("latest_user_message", ""),
+        router_result=router_result,
+        available_files=_available_files_from_context(context_pack),
+    )
+    if selected_skill:
+        safe_print(f"\n[Skill] {selected_skill.skill_id} - {selected_skill.name}")
+    else:
+        safe_print("\n[Skill] No skill matched, using free-planning fallback")
+
+    if selected_skill and selected_skill.implementation_status == "planned":
+        final_answer = sanitize_final_answer(
+            f"“{selected_skill.name}”目前仍处于规划阶段，尚未开放分析工具执行。"
+            "请使用 `/help` 查看已实现和部分实现的能力。"
+        )
+        remember_agent_turn(
+            session_id=session_id,
+            final_answer=final_answer,
+            router_result=router_result,
+            planner_result={},
+            executor_result={},
+        )
+        return _make_agent_result(final_answer, files=[])
+
+    planner_result = run_planner_agent(context_pack, router_result, selected_skill=selected_skill)
+    safe_print(f"\n[Planner] {json.dumps(planner_result, ensure_ascii=False, default=str)}")
+
+    # ---- Phase 3.2: Delegator Agent (复杂任务委派检查) ----
+    if FEATURE_FLAGS.get("sub_agent_delegation", False):
+        complexity = router_result.get("complexity", "")
+        steps = planner_result.get("steps", [])
+        if complexity in ("complex",) and len(steps) >= 3:
+            delegator_result = run_delegator_agent(
+                context_pack,
+                planner_result,
+                selected_skill=selected_skill,
+            )
+            safe_print(f"\n[Delegator] {json.dumps(delegator_result, ensure_ascii=False, default=str)}")
+            if delegator_result.get("should_delegate"):
+                planner_result["delegate_to_sub_agents"] = True
+                planner_result["sub_tasks"] = delegator_result.get("sub_tasks", [])
+            else:
+                planner_result["delegate_to_sub_agents"] = False
+
+    execution_mode = _normalize_execution_mode(
+        planner_result.get("execution_mode")
+        or router_result.get("suggested_mode")
+        or "tool_execution"
+    )
+
+    if execution_mode == "ask_user":
+        question = (
+            planner_result.get("user_question_if_any")
+            or router_result.get("clarification_question")
+            or "我需要你补充一下关键信息后才能继续分析。"
+        )
+
+        final_answer = sanitize_final_answer(
+            f"{question}\n\n请补充信息后再次发送消息，我会继续帮你分析。"
+        )
+
+        remember_agent_turn(
+            session_id=session_id,
+            final_answer=final_answer,
+            router_result=router_result,
+            planner_result=planner_result,
+            executor_result={}
+        )
+
+        return _make_agent_result(final_answer, files=[])
+
+    if execution_mode == "answer_only":
+        categories = resolve_tool_categories(
+            context_pack=context_pack,
+            router_result=router_result,
+            planner_result=planner_result
+        )
+
+        domain_prompt = build_domain_prompt(categories, agent_role="reporter")
+
+        payload = {
+            "context_summary": context_pack.get("summary", ""),
+            "latest_user_message": context_pack.get("latest_user_message", ""),
+            "tool_categories": categories,
+            "router_result": router_result,
+            "planner_result": planner_result
+        }
+
+        messages: Any = [
+            {"role": "system", "content": domain_prompt},
+            {"role": "system", "content": REPORTER_PROMPT},
+            {
+                "role": "user",
+                "content": json.dumps(payload, ensure_ascii=False, default=str)
+            }
+        ]
+
+        try:
+            resp = client.chat.completions.create(
+                model=MODEL_NAME,
+                messages=messages,
+                temperature=0.2
+            )
+            final_answer = sanitize_final_answer(
+                resp.choices[0].message.content or ""
+            )
+        except Exception as e:
+            final_answer = f"生成回答失败：{str(e)}"
+
+        remember_agent_turn(
+            session_id=session_id,
+            final_answer=final_answer,
+            router_result=router_result,
+            planner_result=planner_result,
+            executor_result={}
+        )
+
+        return _make_agent_result(final_answer, files=[])
+
+    if planner_result.get("delegate_to_sub_agents") and planner_result.get("sub_tasks"):
+        executor_result = _run_delegated_tasks(
+            planner_result["sub_tasks"],
+            session_id or "",
+            selected_skill=selected_skill,
+        )
+    else:
+        executor_result = run_executor_agent(
+            context_pack=context_pack,
+            router_result=router_result,
+            planner_result=planner_result,
+            session_id=session_id,
+            selected_skill=selected_skill,
+        )
+
+    safe_print(
+        f"\n[Executor Summary] "
+        f"{json.dumps(executor_result, ensure_ascii=False, default=str)[:1500]}"
+    )
+
+    final_answer = run_reporter_agent(
+        context_pack=context_pack,
+        router_result=router_result,
+        planner_result=planner_result,
+        executor_result=executor_result,
+        selected_skill=selected_skill,
+    )
+
+    final_answer = sanitize_final_answer(final_answer)
+
+    output_files = executor_result.get("output_files", []) or []
+    output_files = _dedupe_files(output_files)
+
+    safe_print(
+        "\n[BioAgent Output Files] "
+        + json.dumps(output_files, ensure_ascii=False, default=str)[:2000]
+    )
+
+    remember_agent_turn(
+        session_id=session_id,
+        final_answer=final_answer,
+        router_result=router_result,
+        planner_result=planner_result,
+        executor_result=executor_result
+    )
+
+    return _make_agent_result(final_answer, files=output_files)
+
+
+async def run_bio_agent(
+    history_messages: list,
+    session_id: str = "",
+    available_files: Optional[List[Any]] = None,
+) -> Dict[str, Any]:
+    """在线程中运行同步 Agent/工具链，避免阻塞 FastAPI 事件循环。"""
+    try:
+        return await asyncio.to_thread(
+            _run_bio_agent_sync,
+            history_messages,
+            session_id,
+            available_files,
+        )
+    finally:
+        if FEATURE_FLAGS.get("hooks_enabled", False):
+            try:
+                from app.agent.hooks import HookPoint, hook_manager
+
+                hook_manager.trigger(
+                    HookPoint.POST_AGENT_TURN,
+                    {"session_id": session_id or ""},
+                )
+            except Exception:
+                pass

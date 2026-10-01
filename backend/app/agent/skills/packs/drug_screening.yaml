@@ -1,0 +1,34 @@
+skills:
+  - skill_id: drug_sensitivity_prediction
+    name: "药物敏感性预测"
+    category: drug_screening
+    description: "基于基因组/转录组特征预测细胞系或患者对药物的敏感性"
+    task_types: [bioinformatics]
+    subtask_types: [drug_screening]
+    trigger_keywords: [drug sensitivity, drug response, pharmacogenomics, GDSC, CTRP]
+    trigger_keywords_cn: [药物敏感性, 药物反应, 药敏, GDSC, IC50]
+    required_inputs: [expression_file, drug_response_file]
+    allowed_tools: []
+    tool_categories: [drug_screening, ml]
+    max_tool_rounds: 14
+    safety_rules: ["药敏预测是计算推断", "不等同于临床用药建议", "需要体外验证"]
+    implementation_status: planned
+    priority: medium
+    version: "1.0"
+
+  - skill_id: drug_repurposing
+    name: "药物重定位分析"
+    category: drug_screening
+    description: "基于疾病基因表达特征，从已有药物中筛选潜在重定位候选"
+    task_types: [bioinformatics]
+    subtask_types: [drug_repurposing]
+    trigger_keywords: [drug repurposing, drug repositioning, connectivity map, CMap]
+    trigger_keywords_cn: [药物重定位, 老药新用, 药物再利用, CMap]
+    required_inputs: [disease_signature_file]
+    allowed_tools: []
+    tool_categories: [drug_screening]
+    max_tool_rounds: 12
+    safety_rules: ["重定位结果需要临床试验验证"]
+    implementation_status: planned
+    priority: medium
+    version: "1.0"

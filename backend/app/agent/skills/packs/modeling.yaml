@@ -1,0 +1,50 @@
+skills:
+  - skill_id: sequence_alignment
+    name: "序列比对分析"
+    category: modeling
+    description: "多序列比对（MSA）、保守性分析、系统发育树构建"
+    task_types: [bioinformatics]
+    subtask_types: [sequence_analysis]
+    trigger_keywords: [alignment, MSA, BLAST, phylogeny, conservation]
+    trigger_keywords_cn: [序列比对, 多序列比对, 保守性, 进化树, 系统发育]
+    required_inputs: [sequence_file]
+    allowed_tools: []
+    tool_categories: [modeling, basic]
+    max_tool_rounds: 10
+    safety_rules: ["序列比对参数影响结果", "进化树是计算推断"]
+    implementation_status: planned
+    priority: medium
+    version: "1.0"
+
+  - skill_id: protein_structure_prediction
+    name: "蛋白结构预测"
+    category: modeling
+    description: "使用 AlphaFold2/ESMFold 预测蛋白质三维结构"
+    task_types: [modeling]
+    subtask_types: [structure_prediction]
+    trigger_keywords: [AlphaFold, protein structure, 3D structure, fold prediction]
+    trigger_keywords_cn: [蛋白结构, AlphaFold, 三维结构, 结构预测, 折叠]
+    required_inputs: [protein_sequence]
+    allowed_tools: []
+    tool_categories: [modeling]
+    max_tool_rounds: 20
+    safety_rules: ["预测结构不等同于实验解析结构", "AlphaFold 对固有无序区域预测不准"]
+    implementation_status: planned
+    priority: high
+    version: "1.0"
+
+  - skill_id: domain_motif_analysis
+    name: "蛋白结构域与 Motif 分析"
+    category: modeling
+    description: "识别蛋白序列中的保守结构域和功能 motif"
+    task_types: [modeling]
+    subtask_types: [domain_analysis]
+    trigger_keywords: [domain, motif, Pfam, InterPro]
+    trigger_keywords_cn: [结构域, motif, Pfam, 功能域, 保守区域]
+    required_inputs: [protein_sequence]
+    allowed_tools: []
+    tool_categories: [modeling, basic]
+    max_tool_rounds: 6
+    implementation_status: planned
+    priority: medium
+    version: "1.0"

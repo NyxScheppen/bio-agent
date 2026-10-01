@@ -1,0 +1,63 @@
+stages:
+  - test
+  - build
+  - verify
+
+default:
+  interruptible: true
+
+backend:test:
+  stage: test
+  image: python:3.12-slim
+  cache:
+    key: pip-${CI_COMMIT_REF_SLUG}
+    paths:
+      - .cache/pip
+  variables:
+    PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+    PYTHONDONTWRITEBYTECODE: "1"
+  before_script:
+    - python -m pip install --upgrade pip
+    - python -m pip install -r requirements-dev.txt
+  script:
+    - python -m compileall -q backend/app
+    - python -m pytest -q backend/tests
+    - python -m pip check
+
+frontend:build:
+  stage: build
+  image: node:22-bookworm-slim
+  cache:
+    key:
+      files:
+        - frontend/package-lock.json
+    paths:
+      - .cache/npm
+  before_script:
+    - cd frontend
+    - npm ci --cache ../.cache/npm --prefer-offline
+  script:
+    - npm run lint
+    - npm run typecheck
+    - npm test
+    - npm run build
+  artifacts:
+    expire_in: 7 days
+    paths:
+      - backend/static/
+
+submission:verify:
+  stage: verify
+  image: python:3.12-slim
+  needs:
+    - job: backend:test
+    - job: frontend:build
+      artifacts: true
+  before_script:
+    - apt-get update
+    - apt-get install -y --no-install-recommends git
+    - rm -rf /var/lib/apt/lists/*
+  script:
+    - python scripts/verify_submission.py
+    - git diff --exit-code -- backend/static
+    - git diff --check

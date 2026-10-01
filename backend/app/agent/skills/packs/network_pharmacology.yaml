@@ -1,0 +1,87 @@
+skills:
+  - skill_id: network_pharm_full
+    name: "网络药理学全流程"
+    category: network_pharmacology
+    description: "中药活性成分筛选→靶点预测→疾病靶点交集→PPI→核心靶点→富集分析"
+    task_types: [bioinformatics]
+    subtask_types: [network_pharmacology]
+    trigger_keywords: [network pharmacology, TCMSP, compound target, herb]
+    trigger_keywords_cn: [网络药理学, 中药, 活性成分, TCMSP, OB, DL, 成分靶点, 草药]
+    required_inputs: [compound_target_file, disease_target_file]
+    optional_inputs: [compound_info_file]
+    default_workflow_id: network_pharmacology_standard
+    allowed_tools: [run_network_pharmacology_analysis, run_ppi_network_analysis, preview_table_file]
+    tool_categories: [network_pharmacology, enrichment, file_io]
+    max_tool_rounds: 14
+    safety_rules: ["网络药理学结果是数据库整合和网络推断", "不等于真实药效证明", "需要体内外实验验证"]
+    report_sections:
+      - section_id: compound_filter
+        title: "活性成分筛选"
+        content_hint: "OB/DL 筛选结果"
+        order: 1
+      - section_id: target_intersection
+        title: "靶点交集"
+        content_hint: "交集靶点数量和韦恩图"
+        order: 2
+      - section_id: ppi
+        title: "PPI 网络"
+        content_hint: "蛋白互作网络、核心靶点"
+        order: 3
+      - section_id: enrichment
+        title: "富集分析"
+        content_hint: "核心靶点 GO/KEGG 结果"
+        order: 4
+    output_expectations: [active_compounds.csv, intersected_targets.csv, ppi_network.png, core_targets.csv]
+    implementation_status: implemented
+    priority: high
+    version: "1.0"
+
+  - skill_id: ppi_network_analysis
+    name: "PPI 蛋白互作网络分析"
+    category: network_pharmacology
+    description: "基于 STRING 数据库构建蛋白互作网络，计算拓扑指标，筛选核心靶点"
+    task_types: [bioinformatics]
+    subtask_types: [ppi_network]
+    trigger_keywords: [PPI, STRING, protein-protein interaction, hub gene]
+    trigger_keywords_cn: [PPI, 蛋白互作, STRING, 核心基因, 网络拓扑]
+    required_inputs: [gene_list_file]
+    default_workflow_id: ppi_standard
+    allowed_tools: [run_ppi_network_analysis, preview_table_file]
+    tool_categories: [network_pharmacology, file_io]
+    max_tool_rounds: 10
+    safety_rules: ["STRING 结果是预测的，不代表真实物理互作"]
+    output_expectations: [ppi_network.png, ppi_interactions.csv, hub_genes.csv, ppi_betweenness.csv]
+    implementation_status: implemented
+    priority: high
+    version: "1.0"
+
+  - skill_id: herb_compound_target
+    name: "中药成分-靶点分析"
+    category: network_pharmacology
+    description: "从中药/草药中筛选活性成分并预测作用靶点"
+    task_types: [bioinformatics]
+    subtask_types: [network_pharmacology]
+    trigger_keywords_cn: [中药成分, 草药, 活性成分筛选, 成分靶点预测]
+    required_inputs: [herb_name_list]
+    allowed_tools: [run_network_pharmacology_analysis]
+    tool_categories: [network_pharmacology]
+    max_tool_rounds: 10
+    implementation_status: partial
+    priority: medium
+    version: "1.0"
+
+  - skill_id: cytoscape_network_export
+    name: "Cytoscape 网络导出"
+    category: network_pharmacology
+    description: "将 PPI 或网络药理学结果导出为 Cytoscape 兼容格式（SIF/GraphML）"
+    task_types: [bioinformatics]
+    subtask_types: [network_export]
+    trigger_keywords: [cytoscape, sif, graphml]
+    trigger_keywords_cn: [Cytoscape, 网络图, 导出网络]
+    required_inputs: [network_file]
+    allowed_tools: []
+    tool_categories: [network_pharmacology]
+    max_tool_rounds: 4
+    implementation_status: planned
+    priority: low
+    version: "1.0"

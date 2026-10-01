@@ -2,7 +2,7 @@
 Phase 2: Tool Lifecycle Unit Tests.
 
 Run:
-    cd D:/Desktop/bio_test
+    cd path/to/bio_test
     .venv/Scripts/python.exe backend/tests/test_tool_lifecycle.py
 """
 

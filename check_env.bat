@@ -71,7 +71,7 @@ if not defined SYS_PYTHON (
 if not defined SYS_PYTHON (
     where python >nul 2>nul
     if not errorlevel 1 (
-        python -c "import sys; raise SystemExit(0 if (3, 11) ^<= sys.version_info[:2] ^< (3, 13) else 1)" >nul 2>nul
+        python -c "import sys; raise SystemExit(0 if sys.version_info[:2] in ((3, 11), (3, 12)) else 1)" >nul 2>nul
         if not errorlevel 1 set "SYS_PYTHON=python"
     )
 )

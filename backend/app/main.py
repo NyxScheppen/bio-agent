@@ -33,6 +33,11 @@ BACKEND_DIR = APP_DIR.parent
 STATIC_DIR = BACKEND_DIR / "static"
 ASSETS_DIR = STATIC_DIR / "assets"
 INDEX_HTML = STATIC_DIR / "index.html"
+INDEX_RESPONSE_HEADERS = {
+    "Cache-Control": "no-store, max-age=0",
+    "Pragma": "no-cache",
+    "Expires": "0",
+}
 
 print("APP_DIR =", APP_DIR)
 print("BACKEND_DIR =", BACKEND_DIR)
@@ -124,10 +129,14 @@ if ASSETS_DIR.exists():
     app.mount("/assets", StaticFiles(directory=str(ASSETS_DIR)), name="assets")
 
 
+def frontend_index_response() -> FileResponse:
+    return FileResponse(str(INDEX_HTML), headers=INDEX_RESPONSE_HEADERS)
+
+
 @app.get("/")
 async def serve_index():
     if INDEX_HTML.exists():
-        return FileResponse(str(INDEX_HTML))
+        return frontend_index_response()
 
     return {
         "message": "Bio Agent Backend is running",
@@ -159,7 +168,9 @@ async def serve_spa(full_path: str):
 
     # 如果请求的是 static 下真实存在的文件，比如 favicon.svg、robots.txt
     if target.exists() and target.is_file():
+        if target.resolve() == INDEX_HTML.resolve():
+            return frontend_index_response()
         return FileResponse(str(target))
 
     # React/Vite SPA 路由兜底
-    return FileResponse(str(INDEX_HTML))
+    return frontend_index_response()

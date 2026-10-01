@@ -1,9 +1,17 @@
 # BioAI Agent
 
+[English documentation](README.en.md) · [iGEM submission guide](docs/IGEM_SUBMISSION.md) · [Contributing](CONTRIBUTING.md)
+
 > 面向生物信息学与合成生物学领域的 AI 智能助手  
 > 通过自然语言对话执行专业生信分析 —— 从数据上传到可视化全流程自动化
 
+本项目是 [iGEM 2026 Team LZU GANSU](https://2026.igem.wiki/lzu-gansu) 的开源软件成果。
+队伍的官方 iGEM GitLab 项目位于
+[2026/lzu-gansu](https://gitlab.igem.org/2026/lzu-gansu)。
+
 **版本**: 2.0 &nbsp;|&nbsp; **最后更新**: 2026-09-30
+
+![BioAI Agent 新版工作区界面](docs/assets/bioai-agent-interface.png)
 
 ---
 
@@ -38,7 +46,7 @@ BioAI Agent 是一个全栈 AI 应用，将大语言模型与生物信息学工�
 | AI / LLM | DeepSeek API（OpenAI 兼容接口） |
 | 数据库 | SQLite + SQLAlchemy 2.0 |
 | R 集成 | subprocess + Rscript (R 4.2+) |
-| 前端 | 已打包的 Vite + React SPA（运行仓库包含静态构建产物） |
+| 前端 | React + TypeScript + Vite（源码位于 `frontend/`，构建到 `backend/static/`） |
 | 数据处理 | Pandas, NumPy, Scikit-learn, SciPy |
 | 可视化 | Matplotlib, Seaborn (Python) + ggplot2 (R) |
 
@@ -72,6 +80,17 @@ start_app.bat
 应用默认在 `http://127.0.0.1:8000` 启动，浏览器自动打开。修改 `API_HOST` 或 `API_PORT` 后，启动脚本会使用新配置。
 
 > ⚠️ `start_app.bat` 将自动创建虚拟环境、安装 Python 依赖、定位 Rscript，无需手动配置。
+
+### 从源码构建前端
+
+```bash
+cd frontend
+npm ci
+npm run build
+```
+
+构建产物写入 `backend/static/`，FastAPI 会在根路径提供该 SPA。开发时运行
+`npm run dev`，Vite 会把 `/api` 和 `/files` 代理到 `127.0.0.1:8000`。
 
 逐项能力验证结果、真实执行证据和外部服务阻断记录见
 [`docs/README_FEATURE_VERIFICATION.md`](docs/README_FEATURE_VERIFICATION.md)。外部数据库能力依赖
@@ -167,6 +186,9 @@ API_PORT=8000
 ```
 bio_test/
 ├── README.md
+├── README.en.md               # English/iGEM-facing documentation
+├── LICENSE                    # MIT open-source license
+├── .gitlab-ci.yml             # Reproducibility and regression pipeline
 ├── start_app.bat              # 一键启动
 ├── check_env.bat              # 环境检测
 ├── requirements.txt           # Python 依赖
@@ -191,8 +213,9 @@ bio_test/
 │       └── utils/             # 工具函数
 │
 ├── env/r_libs/                # R 私有包库
+├── frontend/                  # React/TypeScript/Vite 前端源码
 ├── logs/                      # 日志目录
-├── docs/                      # 文档（含架构思维导图 mindmap.html）
+├── docs/                      # 行为契约、修复计划与能力验证
 └── runtime/                   # 运行时脚本
 ```
 
@@ -270,8 +293,16 @@ skills:
 
 ## 📄 License
 
-待定
+本项目以 [MIT License](LICENSE) 开源。第三方依赖仍分别适用其原始许可证，详见
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 
----
+## 🧬 iGEM 队伍
 
-🤖 Generated with Claude Code
+- **队伍**：iGEM 2026 Team LZU GANSU
+- **学校**：兰州大学（Lanzhou University）
+- **官方队伍标识**：`lzu-gansu`
+- **队伍 Wiki**：[https://2026.igem.wiki/lzu-gansu](https://2026.igem.wiki/lzu-gansu)
+- **iGEM GitLab Wiki 项目**：[https://gitlab.igem.org/2026/lzu-gansu](https://gitlab.igem.org/2026/lzu-gansu)
+
+软件专用 iGEM GitLab 仓库将在队伍通过官方 Software Deliverable 页面领取后补充。
+个人贡献与指导教师信息以最终 Attributions Form 和队伍 Wiki 为准。

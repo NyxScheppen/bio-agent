@@ -21,12 +21,12 @@
 | Python 私有环境 | PASS | `.venv` 执行 `pip check`：No broken requirements found |
 | R 私有包库 | PASS | `install_r_packages.R` 从 `env/r_libs` 加载全部 27 个顶层包及必需依赖 |
 | Python 编译 | PASS | `python -m compileall -q backend/app` |
-| 后端回归 | PASS | `217 passed` |
+| 后端回归 | PASS | `220 passed` |
 | Multi-Agent/Skill 契约 | PASS | 68 个聚焦测试通过 |
 | 注册工具 | PASS | 运行时共 40 个，与 README 一致 |
 | Skill | PASS | 54 个：22 implemented、3 partial、29 planned |
 | 斜杠命令 | PASS | 运行时共 21 个，与 README 一致 |
-| 前端产物 | PASS | `backend/static/index.html`、Vite 资源和 React 18.3.1 生产包存在 |
+| 前端产物 | PASS | React 19.2.0 + TypeScript/Vite 源码、npm 锁文件和 `backend/static` 生产构建均通过 lint、类型检查、测试与构建 |
 | HTTP 402/额度不足 | PASS | 所有本次请求均未出现 402 或额度不足 |
 
 系统 Python 上另有与本项目无关的 `nyx-server` 缺失依赖，因此权威依赖检查使用项目 `.venv`，结果为通过。

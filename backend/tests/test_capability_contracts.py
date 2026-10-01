@@ -520,6 +520,35 @@ def test_server_browser_url_handles_wildcard_and_ipv6_hosts():
     assert browser_url("::", 9000) == "http://127.0.0.1:9000"
     assert browser_url("::1", 9000) == "http://[::1]:9000"
     assert browser_url("localhost", 9000) == "http://localhost:9000"
+    assert browser_url("localhost", 9000, cache_token="build 1") == (
+        "http://localhost:9000/?v=build+1"
+    )
+
+
+def test_server_run_opens_cache_busted_frontend(monkeypatch):
+    import app.server as server
+
+    captured = {}
+
+    class FakeTimer:
+        daemon = False
+
+        def __init__(self, interval, function, args):
+            captured["timer"] = (interval, function, args)
+
+        def start(self):
+            captured["started"] = True
+
+    monkeypatch.setattr(server, "frontend_build_token", lambda: "build 1")
+    monkeypatch.setattr(server.threading, "Timer", FakeTimer)
+    monkeypatch.setattr(server.uvicorn, "run", lambda *args, **kwargs: None)
+
+    server.run(open_browser=True)
+
+    assert captured["timer"][2] == (
+        server.browser_url(cache_token="build 1"),
+    )
+    assert captured["started"] is True
 
 
 def test_readme_and_dependency_contracts_are_current():

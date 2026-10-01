@@ -7,8 +7,8 @@ Phase 3 示例：使用 Pydantic params_model 注册工具。
 3. 最简写法：函数签名自动推导
 
 运行验证：
-    cd D:/Desktop/bio_test
-    $env:PYTHONPATH = "D:/Desktop/bio_test/backend"
+    cd path/to/bio_test
+    $env:PYTHONPATH = "$PWD/backend"
     .venv/Scripts/python.exe -c "from app.tools.example_pydantic_tool import *; print('OK')"
 """
 

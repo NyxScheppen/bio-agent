@@ -67,7 +67,7 @@ if not defined SYS_PYTHON (
 if not defined SYS_PYTHON (
     where python >nul 2>nul
     if not errorlevel 1 (
-        python -c "import sys; raise SystemExit(0 if (3, 11) ^<= sys.version_info[:2] ^< (3, 13) else 1)" >nul 2>nul
+        python -c "import sys; raise SystemExit(0 if sys.version_info[:2] in ((3, 11), (3, 12)) else 1)" >nul 2>nul
         if not errorlevel 1 set "SYS_PYTHON=python"
     )
 )
@@ -103,9 +103,11 @@ if not exist "%PYTHON_CMD%" (
     exit /b 1
 )
 
-"%PYTHON_CMD%" -c "import sys; raise SystemExit(0 if (3, 11) ^<= sys.version_info[:2] ^< (3, 13) else 1)" >nul 2>nul
+"%PYTHON_CMD%" -c "import sys; raise SystemExit(0 if sys.version_info[:2] in ((3, 11), (3, 12)) else 1)" >nul 2>nul
 if errorlevel 1 (
     echo [ERROR] The existing .venv does not use Python 3.11 or 3.12.
+    echo [INFO] Detected virtual environment version:
+    "%PYTHON_CMD%" --version
     echo [INFO] Remove %PROJECT_ROOT%\.venv and run this script again.
     pause
     exit /b 1

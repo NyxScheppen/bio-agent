@@ -2,7 +2,7 @@
 Phase 3+: Skill System Unit Tests.
 
 Run:
-    cd D:/Desktop/bio_test
+    cd path/to/bio_test
     .venv/Scripts/python.exe backend/tests/test_skill_system.py
 """
 

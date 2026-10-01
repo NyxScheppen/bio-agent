@@ -1,26 +1,46 @@
 """Configured Uvicorn entry point used by the portable launcher."""
 
 import argparse
+from pathlib import Path
 import threading
+from urllib.parse import urlencode
 import webbrowser
 
 import uvicorn
 
 from app.core.config import API_HOST, API_PORT
 
+FRONTEND_INDEX = Path(__file__).resolve().parent.parent / "static" / "index.html"
 
-def browser_url(host: str = API_HOST, port: int = API_PORT) -> str:
+
+def frontend_build_token(index_path: Path = FRONTEND_INDEX) -> str | None:
+    """Return a stable token that changes whenever the built frontend changes."""
+    try:
+        return str(index_path.stat().st_mtime_ns)
+    except OSError:
+        return None
+
+
+def browser_url(
+    host: str = API_HOST,
+    port: int = API_PORT,
+    *,
+    cache_token: str | None = None,
+) -> str:
     """Return a local URL even when the server listens on a wildcard address."""
     normalized = (host or "127.0.0.1").strip()
     if normalized in {"0.0.0.0", "::", "[::]", "*"}:
         normalized = "127.0.0.1"
     elif ":" in normalized and not normalized.startswith("["):
         normalized = f"[{normalized}]"
-    return f"http://{normalized}:{int(port)}"
+    url = f"http://{normalized}:{int(port)}"
+    if cache_token:
+        url = f"{url}/?{urlencode({'v': cache_token})}"
+    return url
 
 
 def run(*, open_browser: bool = False) -> None:
-    url = browser_url()
+    url = browser_url(cache_token=frontend_build_token())
     print(f"[server] Listening on {API_HOST}:{API_PORT}")
     print(f"[server] Browser URL: {url}")
     if open_browser:
@@ -44,7 +64,7 @@ def main() -> None:
     )
     args = parser.parse_args()
     if args.print_url:
-        print(browser_url())
+        print(browser_url(cache_token=frontend_build_token()))
         return
     run(open_browser=args.open_browser)
 

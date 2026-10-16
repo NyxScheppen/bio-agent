@@ -602,7 +602,7 @@ function App() {
   }
 }
 
-  const handleAgentSwitch = async (agent) => {
+  const handleAgentSwitch = (agent) => {
     if (!currentSession || isLoading) return
 
     updateSession(currentSession.id, (session) => ({
@@ -617,10 +617,6 @@ function App() {
           : item
       )
     }))
-
-    await sendCustomMessage(agent.command, {
-      clearInput: false
-    })
   }
 
   const handleFileUpload = async (event) => {

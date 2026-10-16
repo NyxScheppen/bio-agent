@@ -3,17 +3,17 @@
 export const API_BASE = (import.meta.env.VITE_API_BASE || '').replace(/\/$/, '')
 
 export const AGENT_OPTIONS = [
-  { key: 'bird', label: '🐦 小红', command: '切换到小红模式' },
-  { key: 'fox', label: '🦊 小紫', command: '切换到小紫模式' },
-  { key: 'lion', label: '🦁 小蓝', command: '切换到小蓝模式' },
-  { key: 'snake', label: '🐍 小灰', command: '切换到小灰模式' }
+  { key: 'bird', label: '🐦' },
+  { key: 'fox', label: '🦊' },
+  { key: 'lion', label: '🦁' },
+  { key: 'snake', label: '🐍' }
 ]
 
 export const AGENT_WELCOME_MESSAGES = {
-  bird: '你好，我是小红，可以帮你完成常见生信分析、文件处理和结果整理。',
-  fox: '你好，我是小紫。我会先检查数据，再尽量给出稳妥的分析结果。',
-  lion: '你好，我是小蓝，可以协助你完成分析、建模和结果汇总。',
-  snake: '你好，我是小灰。请尽量把目标、数据和需求说明清楚。'
+  bird: '你好，我是🐦，可以帮你完成常见生信分析、文件处理和结果整理。',
+  fox: '你好，我是🦊。我会先检查数据，再尽量给出稳妥的分析结果。',
+  lion: '你好，我是🦁，可以协助你完成分析、建模和结果汇总。',
+  snake: '你好，我是🐍。请尽量把目标、数据和需求说明清楚。'
 }
 
 export const AGENT_STATUS_MESSAGES = {
@@ -24,10 +24,10 @@ export const AGENT_STATUS_MESSAGES = {
 }
 
 export const AGENT_LOADING_MESSAGES = {
-  bird: '小红正在处理中',
-  fox: '小紫正在处理中',
-  lion: '小蓝正在处理中',
-  snake: '小灰正在处理中'
+  bird: '🐦 正在处理中',
+  fox: '🦊 正在处理中',
+  lion: '🦁 正在处理中',
+  snake: '🐍 正在处理中'
 }
 
 export const AGENT_AVATARS = {

@@ -123,7 +123,7 @@ function App() {
   const currentTheme = currentSession?.agentMode || 'bird'
   const themeStyle = THEME_STYLE_MAP[currentTheme] || THEME_STYLE_MAP.bird
   const currentAgentLabel =
-    AGENT_OPTIONS.find((a) => a.key === currentTheme)?.label || '🐦 小红'
+    AGENT_OPTIONS.find((a) => a.key === currentTheme)?.label || '🐦'
   const loadingText = AGENT_LOADING_MESSAGES[currentTheme] || AGENT_LOADING_MESSAGES.bird
   const uploadIcon = AGENT_UPLOAD_ICONS[currentTheme] || '📁'
   const inputPlaceholder =

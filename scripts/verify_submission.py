@@ -22,7 +22,7 @@ REQUIRED = {
     "renv.lock",
     "frontend/package.json",
     "frontend/package-lock.json",
-    "frontend/src/App.tsx",
+    "frontend/src/App.jsx",
     "backend/app/main.py",
     "backend/static/index.html",
 }

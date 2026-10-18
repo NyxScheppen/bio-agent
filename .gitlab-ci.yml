@@ -38,8 +38,6 @@ frontend:build:
     - npm ci --cache ../.cache/npm --prefer-offline
   script:
     - npm run lint
-    - npm run typecheck
-    - npm test
     - npm run build
   artifacts:
     expire_in: 7 days

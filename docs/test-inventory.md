@@ -37,3 +37,16 @@
 | `test_process_timeout_reaps_descendant` | 资源回收 | 超时会终止工具启动的后代进程，不遗留孤儿进程 |
 | `test_unserializable_process_result_becomes_error` | 边界鲁棒 | 不可序列化的跨进程返回值转换为明确错误 |
 | `test_abnormal_process_exit_becomes_error_immediately` | 边界鲁棒 | 工具进程异常退出时立即报错，不等待完整超时 |
+| `test_process_records_resource_samples` | 功能正确 | 工具执行后返回非空的 worker 进程树峰值内存与平均 CPU |
+
+## 数值正确性基准
+
+阶段：评委答辩准备（Known-Result Benchmarks）
+
+| 测试 | 方向 | 检查内容 |
+|---|---|---|
+| `test_gc_content_v1_all_gc` | 功能正确 | 全 GC 序列的 GC 含量为 100.0 |
+| `test_gc_content_v1_mixed` | 功能正确 | GCGCATAT 的 GC 含量为 50.0 |
+| `test_gc_content_v2_known` | 功能正确 | ATGC 的 GC 计数/总碱基/含量三项均正确 |
+| `test_count_sequence_bases_known` | 功能正确 | AATTGGCC 各碱基计数与总量正确 |
+| `test_reverse_complement_known` | 功能正确 | ATGC 的反向互补为 GCAT |

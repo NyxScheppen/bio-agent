@@ -10,7 +10,7 @@ from app.api.chat import router as chat_router
 from app.api.upload import router as upload_router
 from app.api.history import router as history_router
 from app.api.system import router as system_router
-from app.core.config import MAX_UPLOAD_REQUEST_BYTES
+from app.core.config import MAX_UPLOAD_REQUEST_BYTES, CORS_ORIGINS
 from app.upload_limit import UploadBodyLimitMiddleware
 
 from app.core.paths import STORAGE_DIR, GENERATED_DIR
@@ -67,7 +67,7 @@ app.add_middleware(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=CORS_ORIGINS,
     allow_methods=["*"],
     allow_headers=["*"],
 )

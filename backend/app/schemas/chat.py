@@ -10,5 +10,5 @@ class AttachedFileItem(BaseModel):
 
 class ChatRequest(BaseModel):
     messages: List[Dict[str, str]]
-    session_id: Optional[str] = "default"
+    session_id: Optional[str] = None
     attached_files: Optional[List[AttachedFileItem]] = []

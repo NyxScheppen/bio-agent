@@ -27,6 +27,7 @@ except ImportError:  # pragma: no cover - optional hardening dependency
 PROCESS_EXIT_GRACE_SECONDS = 0.5
 PROCESS_KILL_GRACE_SECONDS = 1.0
 PROCESS_POLL_INTERVAL_SECONDS = 0.05
+PROCESS_SAMPLE_INTERVAL_SECONDS = 0.2
 
 
 @dataclass
@@ -37,6 +38,8 @@ class ToolProcessOutcome:
     cancelled: bool = False
     worker_pid: Optional[int] = None
     tree_terminated: bool = False
+    peak_memory_mb: Optional[float] = None
+    avg_cpu_percent: Optional[float] = None
 
 
 def _tool_process_entry(send_conn: Connection, payload: bytes) -> None:
@@ -74,6 +77,66 @@ def _snapshot_descendants(pid: int) -> list[Any]:
         return psutil.Process(pid).children(recursive=True)
     except (psutil.Error, OSError):
         return []
+
+
+def _sample_worker_tree(pid: int, stop_event: threading.Event, samples: list) -> None:
+    """Periodically record (rss_mb, cpu_percent) of a process tree until stopped.
+
+    Process 对象必须跨采样轮复用：`cpu_percent(interval=None)` 依赖上一次对同一
+    实例的调用作基线，每轮重建实例会让每次读数都退化为 0。
+    """
+    if psutil is None:
+        return
+    try:
+        root = psutil.Process(pid)
+    except (psutil.Error, OSError):
+        return
+
+    procs: dict[int, Any] = {root.pid: root}
+    for child in root.children(recursive=True):
+        procs.setdefault(child.pid, child)
+    for p in procs.values():
+        try:
+            p.cpu_percent(interval=None)  # establish baseline; first read is 0
+        except (psutil.Error, OSError):
+            pass
+
+    while not stop_event.is_set():
+        stop_event.wait(PROCESS_SAMPLE_INTERVAL_SECONDS)
+        # 刷新后起的子进程（如 worker 内再 spawn 的 Rscript）
+        try:
+            for child in root.children(recursive=True):
+                if child.pid not in procs:
+                    procs[child.pid] = child
+                    try:
+                        child.cpu_percent(interval=None)
+                    except (psutil.Error, OSError):
+                        pass
+        except (psutil.Error, OSError):
+            pass
+
+        rss = 0.0
+        cpu = 0.0
+        dead: list[int] = []
+        for p in procs.values():
+            try:
+                rss += p.memory_info().rss
+                cpu += p.cpu_percent(interval=None)
+            except (psutil.Error, OSError):
+                dead.append(p.pid)
+        for d in dead:
+            procs.pop(d, None)
+        if procs:
+            samples.append((rss / (1024 * 1024), cpu))
+
+
+def _summarize_samples(samples: list) -> tuple[Optional[float], Optional[float]]:
+    """Reduce samples to (peak_memory_mb, avg_cpu_percent)."""
+    if not samples:
+        return None, None
+    peak = max(s[0] for s in samples)
+    avg_cpu = sum(s[1] for s in samples) / len(samples)
+    return round(peak, 2), round(avg_cpu, 1)
 
 
 def _terminate_process_tree(process: BaseProcess) -> bool:
@@ -159,6 +222,20 @@ def run_tool_in_subprocess(
         send_conn.close()
 
     outcome = ToolProcessOutcome(worker_pid=process.pid)
+
+    # 后台采样 worker 进程树的内存/CPU，得到工具本身的资源消耗。
+    samples: list = []
+    stop_sampling = threading.Event()
+    sampler = None
+    if psutil is not None and process.pid is not None:
+        sampler = threading.Thread(
+            target=_sample_worker_tree,
+            args=(process.pid, stop_sampling, samples),
+            name="bio-tool-sampler",
+            daemon=True,
+        )
+        sampler.start()
+
     deadline = time.monotonic() + max(0.0, timeout_seconds)
 
     try:
@@ -211,6 +288,10 @@ def run_tool_in_subprocess(
                 )
                 return outcome
     finally:
+        stop_sampling.set()
+        if sampler is not None:
+            sampler.join(timeout=PROCESS_KILL_GRACE_SECONDS)
+        outcome.peak_memory_mb, outcome.avg_cpu_percent = _summarize_samples(samples)
         recv_conn.close()
         if process.is_alive() and not (outcome.timed_out or outcome.cancelled):
             outcome.tree_terminated = _terminate_process_tree(process)

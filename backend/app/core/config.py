@@ -13,6 +13,14 @@ MODEL_NAME = os.getenv("MODEL_NAME", "deepseek-chat")
 API_HOST = os.getenv("API_HOST", "127.0.0.1")
 API_PORT = int(os.getenv("API_PORT", 8000))
 
+# CORS 允许的来源（逗号分隔）。生产环境前端由 FastAPI 同源提供，无需跨域；
+# 默认仅放行本机 Vite 开发服务器。定位为本地单用户工具，禁止使用 "*"。
+_cors_raw = os.getenv("CORS_ORIGINS", "")
+CORS_ORIGINS = [o.strip() for o in _cors_raw.split(",") if o.strip()] or [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+]
+
 
 def _positive_int_env(name: str, default: int, maximum: int) -> int:
     try:

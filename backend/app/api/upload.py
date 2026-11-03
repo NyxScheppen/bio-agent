@@ -16,7 +16,7 @@ router = APIRouter()
 @router.post("/api/upload")
 async def upload_files(
     files: List[UploadFile] = File(...),
-    session_id: str = Form("default"),
+    session_id: str = Form(...),
     db: Session = Depends(get_db)
 ):
     if not files:

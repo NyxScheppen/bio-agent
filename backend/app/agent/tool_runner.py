@@ -494,6 +494,12 @@ def run_tool_with_lifecycle(
     else:
         resource_usage = monitor.stop()
 
+    # 用 worker 进程树的实测采样覆盖父进程快照，才是工具本身的资源消耗。
+    if process_outcome.peak_memory_mb is not None:
+        resource_usage.peak_memory_mb = process_outcome.peak_memory_mb
+    if process_outcome.avg_cpu_percent is not None:
+        resource_usage.cpu_percent = process_outcome.avg_cpu_percent
+
     # Private archive inputs are never artifacts. The child normally removes
     # them in a finally block; this parent-side pass also covers hard timeouts.
     _cleanup_private_job_inputs(ctx.job_dir)

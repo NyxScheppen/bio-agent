@@ -330,6 +330,35 @@ def test_abnormal_process_exit_becomes_error_immediately():
     print("[PASS] test_abnormal_process_exit_becomes_error_immediately")
 
 
+def _allocate_and_sleep(n_mb: int, sleep_s: float) -> dict:
+    """Allocate n_mb MB and burn CPU for sleep_s seconds (for resource sampling)."""
+    import math
+
+    data = bytearray(n_mb * 1024 * 1024)
+    end = time.monotonic() + sleep_s
+    while time.monotonic() < end:
+        math.sqrt(1234567.0)
+    return {"allocated": len(data)}
+
+
+def test_process_records_resource_samples():
+    """工具执行后应返回非空的 worker 进程树峰值内存与平均 CPU。"""
+    from app.agent.tool_process import run_tool_in_subprocess
+
+    outcome = run_tool_in_subprocess(
+        _allocate_and_sleep,
+        {"n_mb": 8, "sleep_s": 0.6},
+        timeout_seconds=10.0,
+    )
+    _assert(outcome.result is not None, "tool should complete")
+    _assert(outcome.peak_memory_mb is not None, "peak memory sample should be recorded")
+    _assert(outcome.peak_memory_mb > 0, "peak memory should be positive")
+    _assert(outcome.avg_cpu_percent is not None, "cpu sample should be recorded")
+    _assert(outcome.avg_cpu_percent >= 0, "cpu percent should be non-negative")
+
+    print("[PASS] test_process_records_resource_samples")
+
+
 # ============================================================
 # test_collect_generated_files
 # ============================================================
@@ -480,6 +509,7 @@ if __name__ == "__main__":
         ("test_process_timeout_reaps_descendant", test_process_timeout_reaps_descendant),
         ("test_unserializable_process_result_becomes_error", test_unserializable_process_result_becomes_error),
         ("test_abnormal_process_exit_becomes_error_immediately", test_abnormal_process_exit_becomes_error_immediately),
+        ("test_process_records_resource_samples", test_process_records_resource_samples),
         ("test_collect_generated_files", test_collect_generated_files),
         ("test_collect_generated_files_empty", test_collect_generated_files_empty),
         ("test_collect_generated_files_nonexistent", test_collect_generated_files_nonexistent),
